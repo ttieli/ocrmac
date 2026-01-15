@@ -10,7 +10,14 @@ here = Path(__file__).parent
 readme = (here / "README.md").read_text(encoding="utf-8") if (here / "README.md").exists() else ""
 history = (here / "HISTORY.md").read_text(encoding="utf-8") if (here / "HISTORY.md").exists() else ""
 
-requirements = ["Click>=7.0", "pyobjc-framework-Vision", "pillow"]
+requirements = [
+    "Click>=7.0",
+    "pyobjc-framework-Vision",
+    "pillow",
+    "requests",
+    "PyMuPDF>=1.24.0",
+    "python-docx",
+]
 
 test_requirements = [
     "pytest>=3",
@@ -48,7 +55,7 @@ setup(
     packages=find_packages(include=["ocrmac", "ocrmac.*"]),
     test_suite="tests",
     tests_require=test_requirements,
-    url="https://github.com/straussmaximilian/ocrmac",
+    url="https://github.com/ttieli/ocrmac",
     version="1.0.1",
     zip_safe=False,
 )
