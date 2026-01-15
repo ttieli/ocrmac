@@ -6,14 +6,13 @@ This only works on macOS systems with newer macOS versions (10.15+).
 
 ## Installation
 
-Install via pip:
-```bash
-pip install ocrmac
-```
-
-Or install from GitHub (with CLI support):
 ```bash
 pipx install git+https://github.com/ttieli/ocrmac.git
+```
+
+Or with pip:
+```bash
+pip install git+https://github.com/ttieli/ocrmac.git
 ```
 
 ## CLI Usage
@@ -174,14 +173,13 @@ If you like the project, consider starring it!
 
 ## 安装
 
-通过 pip 安装：
-```bash
-pip install ocrmac
-```
-
-或从 GitHub 安装（支持命令行工具）：
 ```bash
 pipx install git+https://github.com/ttieli/ocrmac.git
+```
+
+或使用 pip：
+```bash
+pip install git+https://github.com/ttieli/ocrmac.git
 ```
 
 ## 命令行使用
