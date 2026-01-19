@@ -22,6 +22,7 @@ from .utils import (
     PDF_AVAILABLE,
     DOCX_AVAILABLE,
 )
+from .adaptive_ocr import AdaptiveOCR
 
 
 def ocr_image(image, framework='livetext', recognition_level='accurate', language=None):
@@ -50,11 +51,26 @@ def ocr_image(image, framework='livetext', recognition_level='accurate', languag
 
 MAX_HEIGHT = 10000
 
-def process_single_image(image, source, framework, level, language):
-    """Process a single image and return OCRResult."""
+def process_single_image(image, source, framework, level, language, adaptive=True):
+    """
+    Process a single image and return OCRResult.
+
+    Args:
+        image: PIL Image
+        source: Source path/URL
+        framework: OCR framework ('vision' or 'livetext')
+        level: Recognition level ('accurate' or 'fast')
+        language: Language preference
+        adaptive: Use adaptive processing (default True)
+    """
     result = OCRResult(source=source)
     width, height = image.size
 
+    if adaptive:
+        # 使用自适应 OCR 处理
+        return process_single_image_adaptive(image, source, framework, language)
+
+    # 旧版处理逻辑（作为备选）
     if height > MAX_HEIGHT:
         click.echo(f"  Image too tall ({height}px), slicing into chunks...", err=True)
         overlap = 500  # pixels overlap
@@ -64,14 +80,14 @@ def process_single_image(image, source, framework, level, language):
         while current_y < height:
             bottom = min(current_y + MAX_HEIGHT, height)
             click.echo(f"    Processing slice {page_num} ({current_y}-{bottom})...", err=True)
-            
+
             crop = image.crop((0, current_y, width, bottom))
-            
+
             try:
                 text, details = ocr_image(crop, framework, level, language)
                 result.add_page(page_num, text, details)
             except Exception as e:
-                 click.echo(f"    Warning: Failed to process slice {page_num}: {e}", err=True)
+                click.echo(f"    Warning: Failed to process slice {page_num}: {e}", err=True)
 
             if bottom == height:
                 break
@@ -83,6 +99,72 @@ def process_single_image(image, source, framework, level, language):
         result.add_page(1, text, details)
 
     return result
+
+
+def process_single_image_adaptive(image, source, framework, language):
+    """
+    使用自适应 OCR 处理图片
+
+    自动检测图片特征并选择最优处理策略：
+    - 高质量数字截图 → 智能切片处理
+    - 低质量物理照片 → 预处理增强 + OCR
+    - 超长图片 → 智能切片 + 坐标合并
+    """
+    result = OCRResult(source=source)
+    width, height = image.size
+
+    try:
+        # 创建自适应 OCR 处理器
+        adaptive = AdaptiveOCR(
+            framework=framework,
+            language=language,
+            enable_table_detection=True,
+            enable_preprocessing=True,
+            verbose=False,
+        )
+
+        # 执行识别
+        ocr_output = adaptive.recognize(image)
+
+        # 输出处理信息
+        info = ocr_output.processing_info
+        profile = ocr_output.profile
+
+        click.echo(f"  Image: {width}x{height}, Source: {info['source']}", err=True)
+
+        if info['preprocessing_applied']:
+            click.echo(f"  Applied preprocessing (contrast: {info['contrast_level']})", err=True)
+
+        if info['needs_slicing']:
+            click.echo(f"  Sliced into {info['slice_count']} parts", err=True)
+
+        # 转换为 OCRResult 格式
+        # 将 MergedResult 转换为旧格式 (text, confidence, bbox)
+        details = [
+            (r.text, r.confidence, r.bbox)
+            for r in ocr_output.results
+        ]
+
+        result.add_page(1, ocr_output.text, details)
+
+        # 如果检测到表格，添加表格信息
+        if ocr_output.tables:
+            click.echo(f"  Detected {len(ocr_output.tables)} table(s)", err=True)
+            # 表格以 Markdown 格式附加到文本
+            for i, table in enumerate(ocr_output.tables):
+                table_md = table.to_markdown()
+                if table_md:
+                    result.tables = getattr(result, 'tables', [])
+                    result.tables.append(table_md)
+
+        return result
+
+    except Exception as e:
+        click.echo(f"  Warning: Adaptive OCR failed, falling back to basic mode: {e}", err=True)
+        # 回退到基本模式
+        text, details = ocr_image(image, framework, 'accurate', language)
+        result.add_page(1, text, details)
+        return result
 
 
 def process_pdf(pdf_path_or_bytes, source, framework, level, language, is_bytes=False):
@@ -126,7 +208,7 @@ def process_docx(docx_path_or_bytes, source, framework, level, language, is_byte
     return result
 
 
-def process_url(url, framework, level, language):
+def process_url(url, framework, level, language, adaptive=True):
     """Process a URL and return OCRResult."""
     file_type = get_url_file_type(url)
     click.echo(f"Downloading from {url}...", err=True)
@@ -142,16 +224,16 @@ def process_url(url, framework, level, language):
         from io import BytesIO
         from PIL import Image
         img = Image.open(BytesIO(content))
-        return process_single_image(img, url, framework, level, language)
+        return process_single_image(img, url, framework, level, language, adaptive=adaptive)
 
 
-def process_input(input_path, framework, level, language, recursive=False):
+def process_input(input_path, framework, level, language, recursive=False, adaptive=True):
     """Process input and return list of OCRResult."""
     input_type = get_input_type(input_path)
     results = []
 
     if input_type == 'url':
-        results.append(process_url(input_path, framework, level, language))
+        results.append(process_url(input_path, framework, level, language, adaptive=adaptive))
 
     elif input_type == 'pdf':
         click.echo(f"Processing PDF: {input_path}", err=True)
@@ -165,7 +247,7 @@ def process_input(input_path, framework, level, language, recursive=False):
         click.echo(f"Processing image: {input_path}", err=True)
         from PIL import Image
         img = Image.open(input_path)
-        results.append(process_single_image(img, input_path, framework, level, language))
+        results.append(process_single_image(img, input_path, framework, level, language, adaptive=adaptive))
 
     elif input_type == 'directory':
         files = list_files_in_directory(input_path, recursive=recursive)
@@ -174,7 +256,7 @@ def process_input(input_path, framework, level, language, recursive=False):
 
         click.echo(f"Found {len(files)} files in {input_path}", err=True)
         for file_path in files:
-            sub_results = process_input(file_path, framework, level, language)
+            sub_results = process_input(file_path, framework, level, language, adaptive=adaptive)
             results.extend(sub_results)
 
     else:
@@ -203,7 +285,9 @@ def process_input(input_path, framework, level, language, recursive=False):
               help='Exclude metadata from markdown output')
 @click.option('--details', is_flag=True, default=False,
               help='Include bounding box details in JSON output')
-def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details):
+@click.option('--no-adaptive', is_flag=True, default=False,
+              help='Disable adaptive processing (use legacy mode)')
+def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details, no_adaptive):
     """
     OCR tool for macOS - Extract text from images, PDFs, and DOCX files.
 
@@ -226,8 +310,9 @@ def main(input_path, output_path, output_format, language, framework, level, rec
       ocrmac ./images/ -o ./results/          # Batch process directory
     """
     from datetime import datetime
+    adaptive = not no_adaptive  # 默认启用自适应处理
     try:
-        results = process_input(input_path, framework, level, language, recursive)
+        results = process_input(input_path, framework, level, language, recursive, adaptive=adaptive)
 
         if not results:
             click.echo("No results.", err=True)

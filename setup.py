@@ -17,7 +17,13 @@ requirements = [
     "requests",
     "PyMuPDF>=1.24.0",
     "python-docx",
+    "numpy",  # Required for adaptive OCR preprocessing
 ]
+
+# Optional dependencies for enhanced preprocessing
+extras_require = {
+    "cv": ["opencv-python>=4.5.0"],  # For better contrast enhancement
+}
 
 test_requirements = [
     "pytest>=3",
@@ -46,6 +52,7 @@ setup(
         ],
     },
     install_requires=requirements,
+    extras_require=extras_require,
     license="MIT license",
     long_description=readme + "\n\n" + history,
     long_description_content_type="text/markdown",
@@ -56,6 +63,6 @@ setup(
     test_suite="tests",
     tests_require=test_requirements,
     url="https://github.com/ttieli/ocrmac",
-    version="1.1.0",
+    version="1.2.0",
     zip_safe=False,
 )

@@ -1,2 +1,6 @@
 pyobjc-framework-Vision
 pillow
+numpy
+
+# Optional: for enhanced preprocessing (CLAHE, better denoising)
+# opencv-python>=4.5.0
