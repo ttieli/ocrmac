@@ -49,6 +49,8 @@ class AdaptiveOCR:
         language: Optional[str] = None,
         enable_table_detection: bool = True,
         enable_preprocessing: bool = True,
+        enable_binarization: bool = False,
+        aggressive_preprocessing: bool = False,
         verbose: bool = False,
     ):
         """
@@ -59,17 +61,24 @@ class AdaptiveOCR:
             language: 语言偏好 (如 'zh-Hans', 'en-US')
             enable_table_detection: 是否启用表格检测
             enable_preprocessing: 是否启用自适应预处理
+            enable_binarization: 是否启用自适应二值化（对低对比度图片有效）
+            aggressive_preprocessing: 是否使用激进预处理模式
             verbose: 是否输出详细信息
         """
         self.framework = framework
         self.language = language
         self.enable_table_detection = enable_table_detection
         self.enable_preprocessing = enable_preprocessing
+        self.enable_binarization = enable_binarization
+        self.aggressive_preprocessing = aggressive_preprocessing
         self.verbose = verbose
 
         # 初始化各模块
         self.analyzer = ImageAnalyzer()
-        self.preprocessor = AdaptivePreprocessor()
+        self.preprocessor = AdaptivePreprocessor(
+            enable_binarization=enable_binarization,
+            aggressive_mode=aggressive_preprocessing,
+        )
         self.slicer = SmartSlicer()
         self.table_detector = TableDetector()
 

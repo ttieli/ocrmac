@@ -51,7 +51,7 @@ def ocr_image(image, framework='livetext', recognition_level='accurate', languag
 
 MAX_HEIGHT = 10000
 
-def process_single_image(image, source, framework, level, language, adaptive=True):
+def process_single_image(image, source, framework, level, language, adaptive=True, binarize=False, aggressive=False):
     """
     Process a single image and return OCRResult.
 
@@ -62,13 +62,15 @@ def process_single_image(image, source, framework, level, language, adaptive=Tru
         level: Recognition level ('accurate' or 'fast')
         language: Language preference
         adaptive: Use adaptive processing (default True)
+        binarize: Enable adaptive binarization
+        aggressive: Enable aggressive preprocessing
     """
     result = OCRResult(source=source)
     width, height = image.size
 
     if adaptive:
         # 使用自适应 OCR 处理
-        return process_single_image_adaptive(image, source, framework, language)
+        return process_single_image_adaptive(image, source, framework, language, binarize=binarize, aggressive=aggressive)
 
     # 旧版处理逻辑（作为备选）
     if height > MAX_HEIGHT:
@@ -101,7 +103,7 @@ def process_single_image(image, source, framework, level, language, adaptive=Tru
     return result
 
 
-def process_single_image_adaptive(image, source, framework, language):
+def process_single_image_adaptive(image, source, framework, language, binarize=False, aggressive=False):
     """
     使用自适应 OCR 处理图片
 
@@ -109,6 +111,14 @@ def process_single_image_adaptive(image, source, framework, language):
     - 高质量数字截图 → 智能切片处理
     - 低质量物理照片 → 预处理增强 + OCR
     - 超长图片 → 智能切片 + 坐标合并
+
+    Args:
+        image: PIL Image
+        source: Source path/URL
+        framework: OCR framework
+        language: Language preference
+        binarize: Enable adaptive binarization (better for low-contrast)
+        aggressive: Enable aggressive preprocessing
     """
     result = OCRResult(source=source)
     width, height = image.size
@@ -120,6 +130,8 @@ def process_single_image_adaptive(image, source, framework, language):
             language=language,
             enable_table_detection=True,
             enable_preprocessing=True,
+            enable_binarization=binarize,
+            aggressive_preprocessing=aggressive,
             verbose=False,
         )
 
@@ -208,7 +220,7 @@ def process_docx(docx_path_or_bytes, source, framework, level, language, is_byte
     return result
 
 
-def process_url(url, framework, level, language, adaptive=True):
+def process_url(url, framework, level, language, adaptive=True, binarize=False, aggressive=False):
     """Process a URL and return OCRResult."""
     file_type = get_url_file_type(url)
     click.echo(f"Downloading from {url}...", err=True)
@@ -224,16 +236,16 @@ def process_url(url, framework, level, language, adaptive=True):
         from io import BytesIO
         from PIL import Image
         img = Image.open(BytesIO(content))
-        return process_single_image(img, url, framework, level, language, adaptive=adaptive)
+        return process_single_image(img, url, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive)
 
 
-def process_input(input_path, framework, level, language, recursive=False, adaptive=True):
+def process_input(input_path, framework, level, language, recursive=False, adaptive=True, binarize=False, aggressive=False):
     """Process input and return list of OCRResult."""
     input_type = get_input_type(input_path)
     results = []
 
     if input_type == 'url':
-        results.append(process_url(input_path, framework, level, language, adaptive=adaptive))
+        results.append(process_url(input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive))
 
     elif input_type == 'pdf':
         click.echo(f"Processing PDF: {input_path}", err=True)
@@ -247,7 +259,7 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
         click.echo(f"Processing image: {input_path}", err=True)
         from PIL import Image
         img = Image.open(input_path)
-        results.append(process_single_image(img, input_path, framework, level, language, adaptive=adaptive))
+        results.append(process_single_image(img, input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive))
 
     elif input_type == 'directory':
         files = list_files_in_directory(input_path, recursive=recursive)
@@ -256,7 +268,7 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
 
         click.echo(f"Found {len(files)} files in {input_path}", err=True)
         for file_path in files:
-            sub_results = process_input(file_path, framework, level, language, adaptive=adaptive)
+            sub_results = process_input(file_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive)
             results.extend(sub_results)
 
     else:
@@ -287,7 +299,11 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
               help='Include bounding box details in JSON output')
 @click.option('--no-adaptive', is_flag=True, default=False,
               help='Disable adaptive processing (use legacy mode)')
-def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details, no_adaptive):
+@click.option('--binarize', is_flag=True, default=False,
+              help='Enable adaptive binarization (better for low-contrast images)')
+@click.option('--aggressive', is_flag=True, default=False,
+              help='Enable aggressive preprocessing (stronger enhancement)')
+def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details, no_adaptive, binarize, aggressive):
     """
     OCR tool for macOS - Extract text from images, PDFs, and DOCX files.
 
@@ -312,7 +328,10 @@ def main(input_path, output_path, output_format, language, framework, level, rec
     from datetime import datetime
     adaptive = not no_adaptive  # 默认启用自适应处理
     try:
-        results = process_input(input_path, framework, level, language, recursive, adaptive=adaptive)
+        results = process_input(
+            input_path, framework, level, language, recursive,
+            adaptive=adaptive, binarize=binarize, aggressive=aggressive
+        )
 
         if not results:
             click.echo("No results.", err=True)
