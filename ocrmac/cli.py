@@ -168,13 +168,13 @@ def process_input(input_path, framework, level, language, recursive=False):
               default='accurate', help='Recognition level (default: accurate, vision only)')
 @click.option('-r', '--recursive', is_flag=True, default=False,
               help='Process directories recursively')
-@click.option('--autosave', is_flag=True, default=False,
-              help='Automatically save to file: {name}_macocr_{timestamp}.{ext}')
+@click.option('-p', '--stdout', is_flag=True, default=False,
+              help='Print output to stdout instead of saving to file')
 @click.option('--no-metadata', is_flag=True, default=False,
               help='Exclude metadata from markdown output')
 @click.option('--details', is_flag=True, default=False,
               help='Include bounding box details in JSON output')
-def main(input_path, output_path, output_format, language, framework, level, recursive, autosave, no_metadata, details):
+def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details):
     """
     OCR tool for macOS - Extract text from images, PDFs, and DOCX files.
 
@@ -190,11 +190,10 @@ def main(input_path, output_path, output_format, language, framework, level, rec
     Examples:
 
     \b
-      ocrmac image.png                        # OCR image, print to stdout
-      ocrmac image.png -o result.md           # Save as markdown
-      ocrmac image.png --autosave             # Save as image_macocr_20230101.md
+      ocrmac image.png                        # OCR and save to image_macocr_TIMESTAMP.md (Default)
+      ocrmac image.png --stdout               # OCR and print to terminal
+      ocrmac image.png -o result.md           # Save as specific file
       ocrmac document.pdf -o result.md        # OCR all PDF pages
-      ocrmac https://example.com/img.png      # OCR from URL
       ocrmac ./images/ -o ./results/          # Batch process directory
     """
     from datetime import datetime
@@ -218,9 +217,42 @@ def main(input_path, output_path, output_format, language, framework, level, rec
 
         output_text = "\n\n---\n\n".join(output_parts)
 
-        # Output
-        if autosave and not output_path:
-            # Auto-save mode: Generate filenames based on source
+        # Logic:
+        # 1. If -o/--output is provided -> Save to that specific path/dir
+        # 2. If --stdout is provided -> Print to terminal
+        # 3. Default -> Auto-save to {stem}_macocr_{timestamp}.{ext}
+
+        if output_path:
+            output_path = Path(output_path)
+
+            # If output is a directory, create files for each result
+            if output_path.is_dir() or (len(results) > 1 and not output_path.suffix):
+                output_path.mkdir(parents=True, exist_ok=True)
+                for result in results:
+                    source_name = Path(result.source).stem
+                    ext = '.md' if output_format == 'markdown' else ('.txt' if output_format == 'text' else '.json')
+                    file_path = output_path / f"{source_name}{ext}"
+
+                    formatted = format_result(
+                        result,
+                        format_type=output_format,
+                        include_metadata=not no_metadata,
+                        include_details=details,
+                    )
+                    file_path.write_text(formatted, encoding='utf-8')
+                    click.echo(f"Saved: {file_path}", err=True)
+            else:
+                # Single output file
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(output_text, encoding='utf-8')
+                click.echo(f"Saved: {output_path}", err=True)
+
+        elif stdout:
+            # Print to stdout
+            click.echo(output_text)
+
+        else:
+            # Default: Auto-save mode
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             ext = '.md' if output_format == 'markdown' else ('.txt' if output_format == 'text' else '.json')
 
@@ -253,34 +285,6 @@ def main(input_path, output_path, output_format, language, framework, level, rec
                 
                 file_path.write_text(formatted_single, encoding='utf-8')
                 click.echo(f"Saved: {file_path}", err=True)
-
-        elif output_path:
-            output_path = Path(output_path)
-
-            # If output is a directory, create files for each result
-            if output_path.is_dir() or (len(results) > 1 and not output_path.suffix):
-                output_path.mkdir(parents=True, exist_ok=True)
-                for result in results:
-                    source_name = Path(result.source).stem
-                    ext = '.md' if output_format == 'markdown' else ('.txt' if output_format == 'text' else '.json')
-                    file_path = output_path / f"{source_name}{ext}"
-
-                    formatted = format_result(
-                        result,
-                        format_type=output_format,
-                        include_metadata=not no_metadata,
-                        include_details=details,
-                    )
-                    file_path.write_text(formatted, encoding='utf-8')
-                    click.echo(f"Saved: {file_path}", err=True)
-            else:
-                # Single output file
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_text(output_text, encoding='utf-8')
-                click.echo(f"Saved: {output_path}", err=True)
-        else:
-            # Print to stdout
-            click.echo(output_text)
 
         return 0
 

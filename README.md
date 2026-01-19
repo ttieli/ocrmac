@@ -20,8 +20,11 @@ pip install git+https://github.com/ttieli/ocrmac.git
 After installation, you can use the `ocrmac` command directly in terminal:
 
 ```bash
-# Basic usage - OCR an image
+# Basic usage - OCR an image and save to file (Default behavior)
 ocrmac image.png
+
+# Print output to terminal (Old default)
+ocrmac image.png --stdout
 
 # Save output to markdown file
 ocrmac image.png -o result.md
@@ -53,8 +56,8 @@ ocrmac image.png --framework livetext  # Apple LiveText (default, macOS Sonoma+)
 
 | Option | Description |
 |--------|-------------|
-| `-o, --output` | Output file path (prints to stdout if not specified) |
-| `--autosave` | Automatically save to file: `{name}_macocr_{timestamp}.md` |
+| `-o, --output` | Output file path. |
+| `-p, --stdout` | Print output to stdout instead of saving to file. |
 | `-f, --format` | Output format: `markdown` (default), `text`, `json` |
 | `-l, --language` | Language preference (e.g., `zh-Hans`, `en-US`) |
 | `--framework` | OCR framework: `vision` or `livetext` (default) |
@@ -230,10 +233,13 @@ pip install git+https://github.com/ttieli/ocrmac.git
 安装后，可直接在终端使用 `ocrmac` 命令：
 
 ```bash
-# 基本用法 - 识别图片
+# 基本用法 - 识别图片并自动保存（默认行为）
 ocrmac image.png
 
-# 保存为 Markdown 文件
+# 打印到终端（不保存文件）
+ocrmac image.png --stdout
+
+# 保存为指定文件
 ocrmac image.png -o result.md
 
 # 识别 PDF 文件（所有页面）
@@ -263,8 +269,8 @@ ocrmac image.png --framework livetext  # Apple LiveText（默认，需 macOS Son
 
 | 选项 | 说明 |
 |------|------|
-| `-o, --output` | 输出文件路径（不指定则输出到终端） |
-| `--autosave` | 自动保存到文件：`{原文件名}_macocr_{时间戳}.md` |
+| `-o, --output` | 输出文件路径 |
+| `-p, --stdout` | 打印到终端，不保存文件 |
 | `-f, --format` | 输出格式：`markdown`（默认）、`text`、`json` |
 | `-l, --language` | 语言偏好（如 `zh-Hans`、`en-US`） |
 | `--framework` | OCR 框架：`vision` 或 `livetext`（默认） |
