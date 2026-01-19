@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 from PIL import Image
 
 if sys.version_info < (3, 9):
-    from typing import List, Optional, Dict, Any
+    from typing import List, Optional, Dict, Any, Tuple
 else:
     from typing import Optional, Any
-    List, Dict = list, dict
+    List, Dict, Tuple = list, dict, tuple
 
 from .image_analyzer import ImageAnalyzer, ImageProfile, ImageSource, ContentType
 from .preprocessor import AdaptivePreprocessor
@@ -16,6 +16,18 @@ from .smart_slicer import SmartSlicer, SliceInfo
 from .coordinate_merger import CoordinateMerger, MergedResult, TextMerger
 from .ocrmac import OCR
 from .table_recovery import TableDetector, Table
+from .region_detector import RegionDetector, DetectedRegion
+
+
+@dataclass
+class RegionOCRResult:
+    """单个区域的 OCR 结果"""
+    region_index: int                   # 区域索引
+    region_bbox: Tuple[int, int, int, int]  # 区域边界 (x, y, w, h)
+    text: str                           # 区域文本
+    results: List[MergedResult]         # 详细结果（含坐标）
+    tables: List[Table]                 # 区域内的表格
+    dominant_color: Optional[Tuple[int, int, int]] = None  # 区域主要颜色
 
 
 @dataclass
@@ -26,6 +38,7 @@ class OCROutput:
     profile: ImageProfile               # 图片特征分析
     tables: List[Table]                 # 检测到的表格
     processing_info: Dict[str, Any]     # 处理信息
+    regions: Optional[List[RegionOCRResult]] = None  # 区域识别结果（如果启用）
 
 
 class AdaptiveOCR:
@@ -51,6 +64,8 @@ class AdaptiveOCR:
         enable_preprocessing: bool = True,
         enable_binarization: bool = False,
         aggressive_preprocessing: bool = False,
+        enable_region_detection: bool = False,
+        region_method: str = 'auto',
         verbose: bool = False,
     ):
         """
@@ -63,6 +78,8 @@ class AdaptiveOCR:
             enable_preprocessing: 是否启用自适应预处理
             enable_binarization: 是否启用自适应二值化（对低对比度图片有效）
             aggressive_preprocessing: 是否使用激进预处理模式
+            enable_region_detection: 是否启用区域检测（多文档分割）
+            region_method: 区域检测方法 ('auto', 'color', 'contour', 'combined')
             verbose: 是否输出详细信息
         """
         self.framework = framework
@@ -71,6 +88,8 @@ class AdaptiveOCR:
         self.enable_preprocessing = enable_preprocessing
         self.enable_binarization = enable_binarization
         self.aggressive_preprocessing = aggressive_preprocessing
+        self.enable_region_detection = enable_region_detection
+        self.region_method = region_method
         self.verbose = verbose
 
         # 初始化各模块
@@ -81,6 +100,7 @@ class AdaptiveOCR:
         )
         self.slicer = SmartSlicer()
         self.table_detector = TableDetector()
+        self.region_detector = RegionDetector(method=region_method)
 
     def recognize(self, image: Image.Image) -> OCROutput:
         """
@@ -94,6 +114,10 @@ class AdaptiveOCR:
         """
         width, height = image.size
 
+        # Step 0: 区域检测（如果启用）
+        if self.enable_region_detection:
+            return self._recognize_with_regions(image)
+
         # Step 1: 分析图片特征
         profile = self.analyzer.analyze(image)
 
@@ -106,6 +130,7 @@ class AdaptiveOCR:
             'needs_slicing': profile.needs_slicing,
             'slice_count': 0,
             'preprocessing_applied': False,
+            'region_count': 0,
         }
 
         if self.verbose:
@@ -151,6 +176,121 @@ class AdaptiveOCR:
             profile=profile,
             tables=tables,
             processing_info=processing_info,
+            regions=None,
+        )
+
+    def _recognize_with_regions(self, image: Image.Image) -> OCROutput:
+        """
+        基于区域检测的 OCR 识别
+
+        1. 检测图片中的独立区域
+        2. 对每个区域单独进行 OCR
+        3. 合并结果
+        """
+        width, height = image.size
+
+        # 检测区域
+        detected_regions = self.region_detector.detect(image)
+
+        if self.verbose:
+            print(f"[AdaptiveOCR] Image: {width}x{height}")
+            print(f"[AdaptiveOCR] Detected {len(detected_regions)} regions")
+
+        # 分析整图特征（用于 profile）
+        profile = self.analyzer.analyze(image)
+
+        processing_info = {
+            'source': profile.source.value,
+            'content_type': profile.content_type.value,
+            'contrast_level': round(profile.contrast_level, 2),
+            'noise_level': round(profile.noise_level, 2),
+            'needs_preprocessing': profile.needs_preprocessing,
+            'needs_slicing': profile.needs_slicing,
+            'slice_count': 0,
+            'preprocessing_applied': False,
+            'region_count': len(detected_regions),
+        }
+
+        # 对每个区域单独 OCR
+        region_results = []
+        all_results = []
+        all_tables = []
+        all_texts = []
+
+        for region in detected_regions:
+            if self.verbose:
+                print(f"[AdaptiveOCR] Processing region {region.index + 1}: "
+                      f"bbox={region.bbox}, color={region.dominant_color}")
+
+            # 分析区域特征
+            region_profile = self.analyzer.analyze(region.image)
+
+            # 预处理区域
+            if self.enable_preprocessing and region_profile.needs_preprocessing:
+                processed_region = self.preprocessor.process(region.image, region_profile)
+                processing_info['preprocessing_applied'] = True
+            else:
+                processed_region = region.image
+
+            # OCR 区域
+            if region_profile.needs_slicing:
+                results = self._process_with_slicing(processed_region, region_profile)
+            else:
+                results = self._process_single(processed_region)
+
+            # 调整坐标到原图空间
+            x_offset, y_offset = region.bbox[0], region.bbox[1]
+            adjusted_results = []
+            for r in results:
+                adjusted_bbox = [
+                    r.bbox[0] + x_offset,
+                    r.bbox[1] + y_offset,
+                    r.bbox[2],
+                    r.bbox[3],
+                ] if len(r.bbox) == 4 else r.bbox
+                adjusted_results.append(MergedResult(
+                    text=r.text,
+                    confidence=r.confidence,
+                    bbox=adjusted_bbox,
+                    slice_index=r.slice_index,
+                    original_bbox=r.original_bbox,
+                ))
+
+            all_results.extend(adjusted_results)
+
+            # 合并区域文本
+            region_text = TextMerger.merge_to_text(results, preserve_lines=True)
+            all_texts.append(f"--- 区域 {region.index + 1} ---\n{region_text}")
+
+            # 表格检测
+            region_tables = []
+            if self.enable_table_detection:
+                region_tables = self._detect_tables(results)
+                all_tables.extend(region_tables)
+
+            # 保存区域结果
+            region_results.append(RegionOCRResult(
+                region_index=region.index,
+                region_bbox=region.bbox,
+                text=region_text,
+                results=results,
+                tables=region_tables,
+                dominant_color=region.dominant_color,
+            ))
+
+        # 合并所有文本
+        text = "\n\n".join(all_texts)
+
+        if self.verbose:
+            print(f"[AdaptiveOCR] Total tables detected: {len(all_tables)}")
+
+        return OCROutput(
+            text=text,
+            results=all_results,
+            profile=profile,
+            tables=all_tables,
+            processing_info=processing_info,
+            regions=region_results,
         )
 
     def recognize_text_only(self, image: Image.Image) -> str:

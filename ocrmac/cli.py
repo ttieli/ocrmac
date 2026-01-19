@@ -51,7 +51,7 @@ def ocr_image(image, framework='livetext', recognition_level='accurate', languag
 
 MAX_HEIGHT = 10000
 
-def process_single_image(image, source, framework, level, language, adaptive=True, binarize=False, aggressive=False):
+def process_single_image(image, source, framework, level, language, adaptive=True, binarize=False, aggressive=False, split_regions=False):
     """
     Process a single image and return OCRResult.
 
@@ -64,13 +64,14 @@ def process_single_image(image, source, framework, level, language, adaptive=Tru
         adaptive: Use adaptive processing (default True)
         binarize: Enable adaptive binarization
         aggressive: Enable aggressive preprocessing
+        split_regions: Enable automatic region detection
     """
     result = OCRResult(source=source)
     width, height = image.size
 
     if adaptive:
         # 使用自适应 OCR 处理
-        return process_single_image_adaptive(image, source, framework, language, binarize=binarize, aggressive=aggressive)
+        return process_single_image_adaptive(image, source, framework, language, binarize=binarize, aggressive=aggressive, split_regions=split_regions)
 
     # 旧版处理逻辑（作为备选）
     if height > MAX_HEIGHT:
@@ -103,7 +104,7 @@ def process_single_image(image, source, framework, level, language, adaptive=Tru
     return result
 
 
-def process_single_image_adaptive(image, source, framework, language, binarize=False, aggressive=False):
+def process_single_image_adaptive(image, source, framework, language, binarize=False, aggressive=False, split_regions=False):
     """
     使用自适应 OCR 处理图片
 
@@ -111,6 +112,7 @@ def process_single_image_adaptive(image, source, framework, language, binarize=F
     - 高质量数字截图 → 智能切片处理
     - 低质量物理照片 → 预处理增强 + OCR
     - 超长图片 → 智能切片 + 坐标合并
+    - 多文档图片 → 区域分割 + 分别 OCR
 
     Args:
         image: PIL Image
@@ -119,6 +121,7 @@ def process_single_image_adaptive(image, source, framework, language, binarize=F
         language: Language preference
         binarize: Enable adaptive binarization (better for low-contrast)
         aggressive: Enable aggressive preprocessing
+        split_regions: Enable automatic region detection
     """
     result = OCRResult(source=source)
     width, height = image.size
@@ -132,6 +135,7 @@ def process_single_image_adaptive(image, source, framework, language, binarize=F
             enable_preprocessing=True,
             enable_binarization=binarize,
             aggressive_preprocessing=aggressive,
+            enable_region_detection=split_regions,
             verbose=False,
         )
 
@@ -143,6 +147,9 @@ def process_single_image_adaptive(image, source, framework, language, binarize=F
         profile = ocr_output.profile
 
         click.echo(f"  Image: {width}x{height}, Source: {info['source']}", err=True)
+
+        if info.get('region_count', 0) > 1:
+            click.echo(f"  Detected {info['region_count']} regions", err=True)
 
         if info['preprocessing_applied']:
             click.echo(f"  Applied preprocessing (contrast: {info['contrast_level']})", err=True)
@@ -220,7 +227,7 @@ def process_docx(docx_path_or_bytes, source, framework, level, language, is_byte
     return result
 
 
-def process_url(url, framework, level, language, adaptive=True, binarize=False, aggressive=False):
+def process_url(url, framework, level, language, adaptive=True, binarize=False, aggressive=False, split_regions=False):
     """Process a URL and return OCRResult."""
     file_type = get_url_file_type(url)
     click.echo(f"Downloading from {url}...", err=True)
@@ -236,16 +243,16 @@ def process_url(url, framework, level, language, adaptive=True, binarize=False, 
         from io import BytesIO
         from PIL import Image
         img = Image.open(BytesIO(content))
-        return process_single_image(img, url, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive)
+        return process_single_image(img, url, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions)
 
 
-def process_input(input_path, framework, level, language, recursive=False, adaptive=True, binarize=False, aggressive=False):
+def process_input(input_path, framework, level, language, recursive=False, adaptive=True, binarize=False, aggressive=False, split_regions=False):
     """Process input and return list of OCRResult."""
     input_type = get_input_type(input_path)
     results = []
 
     if input_type == 'url':
-        results.append(process_url(input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive))
+        results.append(process_url(input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions))
 
     elif input_type == 'pdf':
         click.echo(f"Processing PDF: {input_path}", err=True)
@@ -259,7 +266,7 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
         click.echo(f"Processing image: {input_path}", err=True)
         from PIL import Image
         img = Image.open(input_path)
-        results.append(process_single_image(img, input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive))
+        results.append(process_single_image(img, input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions))
 
     elif input_type == 'directory':
         files = list_files_in_directory(input_path, recursive=recursive)
@@ -268,7 +275,7 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
 
         click.echo(f"Found {len(files)} files in {input_path}", err=True)
         for file_path in files:
-            sub_results = process_input(file_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive)
+            sub_results = process_input(file_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions)
             results.extend(sub_results)
 
     else:
@@ -303,7 +310,9 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
               help='Enable adaptive binarization (better for low-contrast images)')
 @click.option('--aggressive', is_flag=True, default=False,
               help='Enable aggressive preprocessing (stronger enhancement)')
-def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details, no_adaptive, binarize, aggressive):
+@click.option('--split-regions', is_flag=True, default=False,
+              help='Enable automatic region detection and splitting (for multi-document images)')
+def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details, no_adaptive, binarize, aggressive, split_regions):
     """
     OCR tool for macOS - Extract text from images, PDFs, and DOCX files.
 
@@ -330,7 +339,8 @@ def main(input_path, output_path, output_format, language, framework, level, rec
     try:
         results = process_input(
             input_path, framework, level, language, recursive,
-            adaptive=adaptive, binarize=binarize, aggressive=aggressive
+            adaptive=adaptive, binarize=binarize, aggressive=aggressive,
+            split_regions=split_regions
         )
 
         if not results:

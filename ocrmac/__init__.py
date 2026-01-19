@@ -14,6 +14,7 @@ from .smart_slicer import SmartSlicer, SliceInfo
 from .coordinate_merger import CoordinateMerger, MergedResult, TextMerger
 from .table_recovery import TableDetector, Table
 from .layout_analyzer import LayoutAnalyzer
+from .region_detector import RegionDetector, DetectedRegion, split_document_regions
 
 __all__ = [
     # Core
@@ -42,4 +43,8 @@ __all__ = [
     'TableDetector',
     'Table',
     'LayoutAnalyzer',
+    # Region Detection
+    'RegionDetector',
+    'DetectedRegion',
+    'split_document_regions',
 ]
