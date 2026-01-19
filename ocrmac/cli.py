@@ -48,11 +48,40 @@ def ocr_image(image, framework='livetext', recognition_level='accurate', languag
         return f"[OCR Error: {e}]", []
 
 
+MAX_HEIGHT = 10000
+
 def process_single_image(image, source, framework, level, language):
     """Process a single image and return OCRResult."""
     result = OCRResult(source=source)
-    text, details = ocr_image(image, framework, level, language)
-    result.add_page(1, text, details)
+    width, height = image.size
+
+    if height > MAX_HEIGHT:
+        click.echo(f"  Image too tall ({height}px), slicing into chunks...", err=True)
+        overlap = 500  # pixels overlap
+        current_y = 0
+        page_num = 1
+
+        while current_y < height:
+            bottom = min(current_y + MAX_HEIGHT, height)
+            click.echo(f"    Processing slice {page_num} ({current_y}-{bottom})...", err=True)
+            
+            crop = image.crop((0, current_y, width, bottom))
+            
+            try:
+                text, details = ocr_image(crop, framework, level, language)
+                result.add_page(page_num, text, details)
+            except Exception as e:
+                 click.echo(f"    Warning: Failed to process slice {page_num}: {e}", err=True)
+
+            if bottom == height:
+                break
+
+            current_y += MAX_HEIGHT - overlap
+            page_num += 1
+    else:
+        text, details = ocr_image(image, framework, level, language)
+        result.add_page(1, text, details)
+
     return result
 
 
