@@ -167,15 +167,18 @@ def extract_docx_content(docx_path: str) -> Tuple[str, List[Tuple[int, Image.Ima
     # Extract images
     images = []
     image_index = 0
-    for rel in doc.part.rels.values():
-        if "image" in rel.target_ref:
+    try:
+        for rel in doc.part.rels.values():
             try:
-                image_data = rel.target_part.blob
-                img = Image.open(BytesIO(image_data))
-                image_index += 1
-                images.append((image_index, img))
+                if "image" in rel.target_ref:
+                    image_data = rel.target_part.blob
+                    img = Image.open(BytesIO(image_data))
+                    image_index += 1
+                    images.append((image_index, img))
             except Exception:
-                pass  # Skip problematic images
+                continue
+    except Exception:
+        pass  # Ignore general relationship errors
 
     return text_content, images
 
@@ -213,15 +216,18 @@ def extract_docx_from_bytes(docx_bytes: bytes) -> Tuple[str, List[Tuple[int, Ima
     # Extract images
     images = []
     image_index = 0
-    for rel in doc.part.rels.values():
-        if "image" in rel.target_ref:
+    try:
+        for rel in doc.part.rels.values():
             try:
-                image_data = rel.target_part.blob
-                img = Image.open(BytesIO(image_data))
-                image_index += 1
-                images.append((image_index, img))
+                if "image" in rel.target_ref:
+                    image_data = rel.target_part.blob
+                    img = Image.open(BytesIO(image_data))
+                    image_index += 1
+                    images.append((image_index, img))
             except Exception:
-                pass
+                continue
+    except Exception:
+        pass
 
     return text_content, images
 
