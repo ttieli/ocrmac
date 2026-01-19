@@ -127,5 +127,20 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Project specific
 internal/
 tests/test_images/
+output/
+skills/
+
+# Claude Code
+.claude/
+
+# macOS
+**/.DS_Store
+
+# Test artifacts
+tests/*.jpg
+tests/*.md
+tests/region_*.jpg

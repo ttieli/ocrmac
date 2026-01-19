@@ -1,6 +1,48 @@
 [![Downloads](https://static.pepy.tech/badge/ocrmac)](https://pepy.tech/project/ocrmac)
 # ocrmac
+
 A small Python wrapper to extract text from images on a Mac system. Uses the vision framework from Apple. Simply pass a path to an image or a `PIL` image directly and get lists of texts, their confidence, and bounding box.
+
+> **Fork Notice**: This is an enhanced fork of [straussmaximilian/ocrmac](https://github.com/straussmaximilian/ocrmac). See [What's New in This Fork](#whats-new-in-this-fork) for improvements.
+
+## What's New in This Fork
+
+This fork adds significant enhancements for handling **long screenshots**, **complex documents**, and **Chinese text**:
+
+| Feature | Original | This Fork |
+|---------|----------|-----------|
+| **Smart OCR** | - | Auto-selects best strategy for each image |
+| **Long Screenshot Support** | Limited | Intelligent slicing at text boundaries |
+| **Duplicate Handling** | - | Auto-removes overlapping content |
+| **Text Cleaning** | - | Merges broken words, formats headers |
+| **Chinese Support** | Basic | Enhanced (【标题】→ ## 标题, list formatting) |
+| **Layout Analysis** | - | Preserves document structure |
+| **CLI** | Basic | Full-featured with batch processing |
+| **Module Architecture** | Monolithic | Modular (analysis, processing, postprocessing) |
+
+### Quick Comparison
+
+```python
+# Original ocrmac - basic OCR
+from ocrmac import OCR
+text = OCR('image.png').recognize()
+
+# This fork - smart OCR with auto-optimization
+from ocrmac import smart_ocr
+result = smart_ocr('long_screenshot.png')  # Handles 10000px+ images automatically
+print(result['text'])      # Clean, deduplicated text
+print(result['strategy'])  # 'article', 'multi_doc', or 'simple'
+```
+
+### New Modules
+
+```
+ocrmac/
+├── processing/      # SmartOCR, AdaptiveOCR, SmartSlicer
+├── analysis/        # ImageAnalyzer, LayoutAnalyzer, RegionDetector
+├── preprocessing/   # ImagePreprocessor
+└── postprocessing/  # TextCleaner (dedup, merge, format)
+```
 
 This only works on macOS systems with newer macOS versions (10.15+).
 
@@ -101,9 +143,51 @@ from ocrmac import ocrmac
 ocrmac.OCR('test.png').annotate_PIL()
 ```
 
-![Plot](https://github.com/straussmaximilian/ocrmac/blob/main/output.png?raw=true)
+![Plot](https://github.com/ttieli/ocrmac/blob/main/output.png?raw=true)
 
-## Advanced Features (New in 1.1.0)
+## Advanced Features
+
+### Smart OCR (New in 1.3.0)
+
+Intelligent OCR with automatic strategy selection for optimal results on long screenshots and complex documents.
+
+```python
+from ocrmac import smart_ocr
+
+# Simple usage - automatically selects best strategy
+result = smart_ocr('long_screenshot.png')
+print(result['text'])
+
+# With verbose output to see strategy selection
+result = smart_ocr('document.png', verbose=True)
+print(f"Strategy: {result['strategy']}")  # 'article', 'multi_doc', or 'simple'
+print(f"Quality score: {result['score']:.2f}")
+```
+
+**Features:**
+- **Auto-slicing**: Intelligently splits long screenshots at safe boundaries (between text lines)
+- **Duplicate removal**: Handles overlapping content from sliced regions
+- **Layout analysis**: Preserves document structure (headings, paragraphs, lists)
+- **Text cleaning**: Merges broken words, formats Chinese headers, normalizes lists
+
+```python
+from ocrmac import SmartOCR
+from PIL import Image
+
+# Advanced usage with SmartOCR class
+ocr = SmartOCR(
+    framework='livetext',
+    quality_threshold=0.6,
+    verbose=True
+)
+
+image = Image.open('document.png')
+result = ocr.process(image)
+
+print(result['text'])           # Cleaned text
+print(result['strategy'])       # Strategy used
+print(result['profile'])        # Image analysis profile
+```
 
 ### Table Recovery
 
@@ -167,7 +251,7 @@ What abbreviation should you use for your language of choice? [Here](https://www
 
 If you set a wrong language you will see an error message showing the languages available. Note that the `recognition_level` will affect the languages available (fast has fewer)
 
-See also this [Example Notebook](https://github.com/straussmaximilian/ocrmac/blob/main/ExampleNotebook.ipynb) for implementation details.
+See also this [Example Notebook](https://github.com/ttieli/ocrmac/blob/main/notebooks/ExampleNotebook.ipynb) for implementation details.
 
 
 ## Speed
@@ -214,6 +298,37 @@ If you like the project, consider starring it!
 # ocrmac 中文文档
 
 一个轻量级的 Python 工具，用于在 Mac 系统上从图片中提取文字。使用 Apple 的 Vision 框架，只需传入图片路径或 PIL 图像对象，即可获取文字内容、置信度和边界框信息。
+
+> **Fork 说明**：这是 [straussmaximilian/ocrmac](https://github.com/straussmaximilian/ocrmac) 的增强分支。
+
+## 本 Fork 的改进
+
+针对**长截图**、**复杂文档**和**中文文本**进行了大量优化：
+
+| 功能 | 原版 | 本 Fork |
+|------|------|---------|
+| **智能 OCR** | 无 | 自动选择最佳识别策略 |
+| **长截图支持** | 有限 | 在文字边界智能切片 |
+| **重复处理** | 无 | 自动去除重叠内容 |
+| **文本清理** | 无 | 合并断词、格式化标题 |
+| **中文支持** | 基础 | 增强（【标题】→ ## 标题，列表格式化） |
+| **布局分析** | 无 | 保持文档结构 |
+| **命令行** | 基础 | 完整功能，支持批量处理 |
+| **模块架构** | 单体 | 模块化（分析、处理、后处理） |
+
+### 快速对比
+
+```python
+# 原版 - 基础 OCR
+from ocrmac import OCR
+text = OCR('image.png').recognize()
+
+# 本 Fork - 智能 OCR，自动优化
+from ocrmac import smart_ocr
+result = smart_ocr('long_screenshot.png')  # 自动处理 10000px+ 长图
+print(result['text'])      # 清理后的文本，已去重
+print(result['strategy'])  # 'article', 'multi_doc', 或 'simple'
+```
 
 仅支持 macOS 10.15+ 系统。
 
@@ -328,6 +443,31 @@ ocrmac.OCR('test.png', language_preference=['zh-Hans'])
 ```
 
 语言代码参考：`简体中文` -> `zh-Hans`，`英文` -> `en-US`
+
+## 高级功能
+
+### 智能 OCR（1.3.0 新增）
+
+自动选择最佳策略，优化长截图和复杂文档的识别效果。
+
+```python
+from ocrmac import smart_ocr
+
+# 简单用法 - 自动选择最佳策略
+result = smart_ocr('long_screenshot.png')
+print(result['text'])
+
+# 详细输出
+result = smart_ocr('document.png', verbose=True)
+print(f"策略: {result['strategy']}")  # 'article', 'multi_doc', 'simple'
+print(f"质量评分: {result['score']:.2f}")
+```
+
+**功能特点：**
+- **智能切片**：在安全边界（文字行之间）自动分割长截图
+- **去重处理**：处理切片重叠区域的重复内容
+- **布局分析**：保持文档结构（标题、段落、列表）
+- **文本清理**：合并断词、格式化中文标题、规范化列表
 
 ## 关于 LiveText
 

@@ -10,13 +10,13 @@ else:
     from typing import Optional, Any
     List, Dict, Tuple = list, dict, tuple
 
-from .image_analyzer import ImageAnalyzer, ImageProfile, ImageSource, ContentType
-from .preprocessor import AdaptivePreprocessor
-from .smart_slicer import SmartSlicer, SliceInfo
-from .coordinate_merger import CoordinateMerger, MergedResult, TextMerger
-from .ocrmac import OCR
-from .table_recovery import TableDetector, Table
-from .region_detector import RegionDetector, DetectedRegion
+from ..analysis.image import ImageAnalyzer, ImageProfile, ImageSource, ContentType
+from ..preprocessing import ImagePreprocessor as AdaptivePreprocessor
+from .slicer import SmartSlicer, SliceInfo
+from ..analysis.coordinates import CoordinateMerger, MergedResult, TextMerger
+from ..ocrmac import OCR
+from ..analysis.table import TableDetector, Table
+from ..analysis.region import RegionDetector, DetectedRegion
 
 
 @dataclass

@@ -18,12 +18,11 @@ requirements = [
     "PyMuPDF>=1.24.0",
     "python-docx",
     "numpy",  # Required for adaptive OCR preprocessing
+    "opencv-python>=4.5.0",  # Required for region detection
 ]
 
-# Optional dependencies for enhanced preprocessing
-extras_require = {
-    "cv": ["opencv-python>=4.5.0"],  # For better contrast enhancement
-}
+# Optional dependencies
+extras_require = {}
 
 test_requirements = [
     "pytest>=3",

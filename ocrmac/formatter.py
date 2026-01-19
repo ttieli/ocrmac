@@ -60,13 +60,14 @@ class OCRResult:
         return "\n\n".join(parts)
 
 
-def format_markdown(result: OCRResult, include_metadata: bool = True) -> str:
+def format_markdown(result: OCRResult, include_metadata: bool = True, use_layout: bool = False) -> str:
     """
     Format OCR result as Markdown.
 
     Args:
         result: OCR result object
         include_metadata: Whether to include source and timestamp
+        use_layout: Use layout analysis for better paragraph/heading detection
 
     Returns:
         Formatted Markdown string
@@ -94,7 +95,12 @@ def format_markdown(result: OCRResult, include_metadata: bool = True) -> str:
         # Single image/page - no page header needed
         page = result.pages[0]
         if page.get('text'):
-            lines.append(page['text'])
+            text = page['text']
+            # Apply layout analysis if requested and details are available
+            if use_layout and page.get('details'):
+                from .layout_analyzer import format_with_layout
+                text = format_with_layout(page['details'])
+            lines.append(text)
     else:
         for page in result.pages:
             page_num = page.get('page_num', 1)
@@ -104,7 +110,12 @@ def format_markdown(result: OCRResult, include_metadata: bool = True) -> str:
                 lines.append(f"## Page {page_num}")
             lines.append("")
             if page.get('text'):
-                lines.append(page['text'])
+                text = page['text']
+                # Apply layout analysis if requested and details are available
+                if use_layout and page.get('details'):
+                    from .layout_analyzer import format_with_layout
+                    text = format_with_layout(page['details'])
+                lines.append(text)
             else:
                 lines.append("*(No text recognized)*")
             lines.append("")
@@ -172,6 +183,7 @@ def format_result(
     format_type: str = 'markdown',
     include_metadata: bool = True,
     include_details: bool = False,
+    use_layout: bool = False,
 ) -> str:
     """
     Format OCR result according to specified format.
@@ -181,12 +193,13 @@ def format_result(
         format_type: 'markdown', 'text', or 'json'
         include_metadata: Include metadata in output (markdown only)
         include_details: Include bbox details (json only)
+        use_layout: Use layout analysis for better formatting (markdown only)
 
     Returns:
         Formatted string
     """
     if format_type == 'markdown':
-        return format_markdown(result, include_metadata=include_metadata)
+        return format_markdown(result, include_metadata=include_metadata, use_layout=use_layout)
     elif format_type == 'text':
         return format_text(result)
     elif format_type == 'json':

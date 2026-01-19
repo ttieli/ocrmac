@@ -1,5 +1,17 @@
 # History
 
+## 1.3.0 (2026-01-19)
+* Added **Smart OCR** feature: Automatic strategy selection for optimal OCR results.
+* Added **Adaptive Slicing**: Intelligent image slicing at safe boundaries for long screenshots.
+* Added **Text Cleaning**: Automatic duplicate removal, broken word merging, and format normalization.
+* Reorganized module structure:
+  - `ocrmac.processing`: SmartOCR, AdaptiveOCR, SmartSlicer
+  - `ocrmac.analysis`: ImageAnalyzer, LayoutAnalyzer, RegionDetector, TableDetector
+  - `ocrmac.preprocessing`: ImagePreprocessor
+  - `ocrmac.postprocessing`: TextCleaner
+* Added `smart_ocr()` convenience function for one-line intelligent OCR.
+* Improved handling of Chinese text (headers, lists, broken characters).
+
 ## 1.1.0 (2026-01-19)
 * Added **Table Recovery** feature: Detects and reconstructs table structures from OCR results.
 * Added **Layout Analysis** feature: Detects paragraphs, headings, and lists.

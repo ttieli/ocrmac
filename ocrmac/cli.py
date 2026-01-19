@@ -22,7 +22,7 @@ from .utils import (
     PDF_AVAILABLE,
     DOCX_AVAILABLE,
 )
-from .adaptive_ocr import AdaptiveOCR
+from .processing import AdaptiveOCR, SmartOCR
 
 
 def ocr_image(image, framework='livetext', recognition_level='accurate', language=None):
@@ -186,6 +186,64 @@ def process_single_image_adaptive(image, source, framework, language, binarize=F
         return result
 
 
+def process_single_image_smart(image, source, framework, language, verbose=False):
+    """
+    使用智能 OCR 处理图片（自动选择最佳策略）
+
+    Args:
+        image: PIL Image
+        source: Source path/URL
+        framework: OCR framework
+        language: Language preference
+        verbose: Show detailed processing info
+    """
+    result = OCRResult(source=source)
+    width, height = image.size
+
+    try:
+        # 创建智能 OCR 处理器
+        smart = SmartOCR(
+            framework=framework,
+            language=language,
+            max_retries=2,
+            quality_threshold=0.6,
+            verbose=verbose,
+        )
+
+        # 执行智能处理
+        output = smart.process(image)
+
+        # 输出处理信息
+        click.echo(f"  Image: {width}x{height}", err=True)
+        click.echo(f"  Strategy: {output['strategy']} (score: {output['score']:.2f})", err=True)
+        click.echo(f"  Attempts: {output['attempts']}", err=True)
+
+        if output.get('profile'):
+            profile = output['profile']
+            if profile.is_long_screenshot:
+                click.echo(f"  Detected: Long screenshot", err=True)
+            if profile.has_multiple_regions:
+                click.echo(f"  Detected: Multiple regions", err=True)
+
+        # 转换为 OCRResult 格式
+        details = output.get('details', [])
+        if details:
+            details_formatted = [
+                (r.text, r.confidence, r.bbox)
+                for r in details
+            ]
+        else:
+            details_formatted = []
+
+        result.add_page(1, output['text'], details_formatted)
+        return result
+
+    except Exception as e:
+        click.echo(f"  Warning: Smart OCR failed, falling back to adaptive mode: {e}", err=True)
+        # 回退到自适应模式
+        return process_single_image_adaptive(image, source, framework, language)
+
+
 def process_pdf(pdf_path_or_bytes, source, framework, level, language, is_bytes=False):
     """Process a PDF file and return OCRResult."""
     if not PDF_AVAILABLE:
@@ -227,7 +285,7 @@ def process_docx(docx_path_or_bytes, source, framework, level, language, is_byte
     return result
 
 
-def process_url(url, framework, level, language, adaptive=True, binarize=False, aggressive=False, split_regions=False):
+def process_url(url, framework, level, language, adaptive=True, binarize=False, aggressive=False, split_regions=False, smart=False, verbose=False):
     """Process a URL and return OCRResult."""
     file_type = get_url_file_type(url)
     click.echo(f"Downloading from {url}...", err=True)
@@ -243,16 +301,18 @@ def process_url(url, framework, level, language, adaptive=True, binarize=False, 
         from io import BytesIO
         from PIL import Image
         img = Image.open(BytesIO(content))
+        if smart:
+            return process_single_image_smart(img, url, framework, language, verbose=verbose)
         return process_single_image(img, url, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions)
 
 
-def process_input(input_path, framework, level, language, recursive=False, adaptive=True, binarize=False, aggressive=False, split_regions=False):
+def process_input(input_path, framework, level, language, recursive=False, adaptive=True, binarize=False, aggressive=False, split_regions=False, smart=False, verbose=False):
     """Process input and return list of OCRResult."""
     input_type = get_input_type(input_path)
     results = []
 
     if input_type == 'url':
-        results.append(process_url(input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions))
+        results.append(process_url(input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions, smart=smart, verbose=verbose))
 
     elif input_type == 'pdf':
         click.echo(f"Processing PDF: {input_path}", err=True)
@@ -266,7 +326,10 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
         click.echo(f"Processing image: {input_path}", err=True)
         from PIL import Image
         img = Image.open(input_path)
-        results.append(process_single_image(img, input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions))
+        if smart:
+            results.append(process_single_image_smart(img, input_path, framework, language, verbose=verbose))
+        else:
+            results.append(process_single_image(img, input_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions))
 
     elif input_type == 'directory':
         files = list_files_in_directory(input_path, recursive=recursive)
@@ -275,7 +338,7 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
 
         click.echo(f"Found {len(files)} files in {input_path}", err=True)
         for file_path in files:
-            sub_results = process_input(file_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions)
+            sub_results = process_input(file_path, framework, level, language, adaptive=adaptive, binarize=binarize, aggressive=aggressive, split_regions=split_regions, smart=smart, verbose=verbose)
             results.extend(sub_results)
 
     else:
@@ -310,9 +373,15 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
               help='Enable adaptive binarization (better for low-contrast images)')
 @click.option('--aggressive', is_flag=True, default=False,
               help='Enable aggressive preprocessing (stronger enhancement)')
-@click.option('--split-regions', is_flag=True, default=False,
-              help='Enable automatic region detection and splitting (for multi-document images)')
-def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details, no_adaptive, binarize, aggressive, split_regions):
+@click.option('--split-regions', type=click.Choice(['auto', 'on', 'off']), default='auto',
+              help='Region detection mode: auto (smart), on (force), off (disable)')
+@click.option('--layout', is_flag=True, default=False,
+              help='Use layout analysis for better paragraph/heading detection')
+@click.option('--no-smart', is_flag=True, default=False,
+              help='Disable smart auto-detection mode (use legacy adaptive mode)')
+@click.option('--verbose', '-v', is_flag=True, default=False,
+              help='Show detailed processing information')
+def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details, no_adaptive, binarize, aggressive, split_regions, layout, no_smart, verbose):
     """
     OCR tool for macOS - Extract text from images, PDFs, and DOCX files.
 
@@ -336,11 +405,12 @@ def main(input_path, output_path, output_format, language, framework, level, rec
     """
     from datetime import datetime
     adaptive = not no_adaptive  # 默认启用自适应处理
+    smart = not no_smart  # 默认启用智能模式
     try:
         results = process_input(
             input_path, framework, level, language, recursive,
             adaptive=adaptive, binarize=binarize, aggressive=aggressive,
-            split_regions=split_regions
+            split_regions=split_regions, smart=smart, verbose=verbose
         )
 
         if not results:
@@ -355,6 +425,7 @@ def main(input_path, output_path, output_format, language, framework, level, rec
                 format_type=output_format,
                 include_metadata=not no_metadata,
                 include_details=details,
+                use_layout=layout,
             )
             output_parts.append(formatted)
 
@@ -381,6 +452,7 @@ def main(input_path, output_path, output_format, language, framework, level, rec
                         format_type=output_format,
                         include_metadata=not no_metadata,
                         include_details=details,
+                        use_layout=layout,
                     )
                     file_path.write_text(formatted, encoding='utf-8')
                     click.echo(f"Saved: {file_path}", err=True)
@@ -424,6 +496,7 @@ def main(input_path, output_path, output_format, language, framework, level, rec
                     format_type=output_format,
                     include_metadata=not no_metadata,
                     include_details=details,
+                    use_layout=layout,
                 )
                 
                 file_path.write_text(formatted_single, encoding='utf-8')

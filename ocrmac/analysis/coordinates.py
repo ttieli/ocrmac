@@ -9,7 +9,7 @@ else:
     from typing import Optional
     List, Tuple = list, tuple
 
-from .smart_slicer import SliceInfo
+from ..types import SliceInfo
 
 
 @dataclass
