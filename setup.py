@@ -48,6 +48,7 @@ setup(
     entry_points={
         "console_scripts": [
             "ocrmac=ocrmac.cli:main",
+            "macocr=ocrmac.cli:main",  # Alias command
         ],
     },
     install_requires=requirements,
