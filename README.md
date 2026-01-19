@@ -99,6 +99,48 @@ ocrmac.OCR('test.png').annotate_PIL()
 
 ![Plot](https://github.com/straussmaximilian/ocrmac/blob/main/output.png?raw=true)
 
+## Advanced Features (New in 1.1.0)
+
+### Table Recovery
+
+You can extract table structures from images using the `TableDetector`.
+
+```python
+from ocrmac import OCR
+from ocrmac.table_recovery import TableDetector
+
+# 1. Get OCR results
+ocr = OCR('table_image.png', framework='livetext', unit='line')
+results = ocr.recognize()
+
+# 2. Detect table
+detector = TableDetector()
+table = detector.detect(results)
+
+if table:
+    print(table.to_markdown())
+```
+
+### Layout Analysis
+
+Analyze document structure to identify paragraphs, headings, and lists.
+
+```python
+from ocrmac import OCR
+from ocrmac.layout_analyzer import LayoutAnalyzer
+
+# 1. Get OCR results
+ocr = OCR('document_image.png', framework='livetext', unit='line')
+results = ocr.recognize()
+
+# 2. Analyze layout
+analyzer = LayoutAnalyzer()
+layout = analyzer.analyze(results)
+
+# 3. Export to Markdown
+print(analyzer.to_markdown(layout))
+```
+
 ## Functionality
 
 - You can pass the path to an image or a PIL image as an object
