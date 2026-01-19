@@ -347,8 +347,72 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
     return results
 
 
+def show_usage_guide():
+    """显示友好的使用指南"""
+    guide = """
+ocrmac - macOS 原生 OCR 工具 (v1.3.0)
+
+基本用法:
+  ocrmac <图片/PDF/URL>              # OCR 并自动保存为 Markdown
+  ocrmac image.png                   # 保存到 image_macocr_TIMESTAMP.md
+  ocrmac image.png --stdout          # 输出到终端
+  ocrmac image.png -o result.md      # 保存到指定文件
+
+支持的输入类型:
+  • 图片文件: PNG, JPG, JPEG, GIF, BMP, TIFF, WebP
+  • PDF 文件: 自动识别所有页面
+  • DOCX 文件: 提取文本 + OCR 嵌入图片
+  • 网络 URL: 自动下载并处理
+  • 目录: 批量处理目录中的文件
+
+网络图片:
+  ocrmac "https://example.com/image.png"
+  ocrmac "https://example.com/doc.pdf" -o result.md
+
+批量处理:
+  ocrmac ./images/                   # 处理目录中所有文件
+  ocrmac ./images/ -o ./results/     # 输出到指定目录
+  ocrmac ./images/ -r                # 递归处理子目录
+
+输出格式:
+  ocrmac image.png -f markdown       # Markdown 格式（默认）
+  ocrmac image.png -f text           # 纯文本
+  ocrmac image.png -f json           # JSON 格式
+  ocrmac image.png -f json --details # JSON 含坐标信息
+
+语言设置:
+  ocrmac image.png -l zh-Hans        # 简体中文优先
+  ocrmac image.png -l en-US          # 英文优先
+  ocrmac image.png -l ja             # 日文
+
+OCR 框架:
+  ocrmac image.png --framework livetext   # LiveText（默认，macOS Sonoma+）
+  ocrmac image.png --framework vision     # Apple Vision
+
+高级选项:
+  --verbose, -v          # 显示详细处理信息
+  --binarize             # 启用二值化（低对比度图片）
+  --aggressive           # 强力预处理
+  --split-regions auto   # 自动区域分割（auto/on/off）
+  --layout               # 启用布局分析
+  --no-smart             # 禁用智能模式，使用旧版处理
+
+智能处理（默认启用）:
+  • 自动检测图片类型，选择最佳策略
+  • 长截图自动切片，避免切断文字
+  • 自动去重、合并断词、格式化标题
+
+别名命令:
+  macocr                 # 与 ocrmac 完全相同
+
+查看完整帮助:
+  ocrmac --help
+"""
+    click.echo(guide)
+
+
 @click.command()
-@click.argument('input_path', type=str)
+@click.argument('input_path', type=str, required=False, default=None)
 @click.option('-o', '--output', 'output_path', type=str, default=None,
               help='Output file path. If not specified, prints to stdout.')
 @click.option('-f', '--format', 'output_format', type=click.Choice(['markdown', 'text', 'json']),
@@ -403,6 +467,11 @@ def main(input_path, output_path, output_format, language, framework, level, rec
       ocrmac document.pdf -o result.md        # OCR all PDF pages
       ocrmac ./images/ -o ./results/          # Batch process directory
     """
+    # 如果没有提供输入路径，显示使用指南
+    if input_path is None:
+        show_usage_guide()
+        return 0
+
     from datetime import datetime
     adaptive = not no_adaptive  # 默认启用自适应处理
     smart = not no_smart  # 默认启用智能模式
