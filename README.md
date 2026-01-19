@@ -54,6 +54,7 @@ ocrmac image.png --framework livetext  # Apple LiveText (default, macOS Sonoma+)
 | Option | Description |
 |--------|-------------|
 | `-o, --output` | Output file path (prints to stdout if not specified) |
+| `--autosave` | Automatically save to file: `{name}_macocr_{timestamp}.md` |
 | `-f, --format` | Output format: `markdown` (default), `text`, `json` |
 | `-l, --language` | Language preference (e.g., `zh-Hans`, `en-US`) |
 | `--framework` | OCR framework: `vision` or `livetext` (default) |
@@ -263,6 +264,7 @@ ocrmac image.png --framework livetext  # Apple LiveText（默认，需 macOS Son
 | 选项 | 说明 |
 |------|------|
 | `-o, --output` | 输出文件路径（不指定则输出到终端） |
+| `--autosave` | 自动保存到文件：`{原文件名}_macocr_{时间戳}.md` |
 | `-f, --format` | 输出格式：`markdown`（默认）、`text`、`json` |
 | `-l, --language` | 语言偏好（如 `zh-Hans`、`en-US`） |
 | `--framework` | OCR 框架：`vision` 或 `livetext`（默认） |

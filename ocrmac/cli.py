@@ -168,11 +168,13 @@ def process_input(input_path, framework, level, language, recursive=False):
               default='accurate', help='Recognition level (default: accurate, vision only)')
 @click.option('-r', '--recursive', is_flag=True, default=False,
               help='Process directories recursively')
+@click.option('--autosave', is_flag=True, default=False,
+              help='Automatically save to file: {name}_macocr_{timestamp}.{ext}')
 @click.option('--no-metadata', is_flag=True, default=False,
               help='Exclude metadata from markdown output')
 @click.option('--details', is_flag=True, default=False,
               help='Include bounding box details in JSON output')
-def main(input_path, output_path, output_format, language, framework, level, recursive, no_metadata, details):
+def main(input_path, output_path, output_format, language, framework, level, recursive, autosave, no_metadata, details):
     """
     OCR tool for macOS - Extract text from images, PDFs, and DOCX files.
 
@@ -190,10 +192,12 @@ def main(input_path, output_path, output_format, language, framework, level, rec
     \b
       ocrmac image.png                        # OCR image, print to stdout
       ocrmac image.png -o result.md           # Save as markdown
+      ocrmac image.png --autosave             # Save as image_macocr_20230101.md
       ocrmac document.pdf -o result.md        # OCR all PDF pages
       ocrmac https://example.com/img.png      # OCR from URL
       ocrmac ./images/ -o ./results/          # Batch process directory
     """
+    from datetime import datetime
     try:
         results = process_input(input_path, framework, level, language, recursive)
 
@@ -215,7 +219,42 @@ def main(input_path, output_path, output_format, language, framework, level, rec
         output_text = "\n\n---\n\n".join(output_parts)
 
         # Output
-        if output_path:
+        if autosave and not output_path:
+            # Auto-save mode: Generate filenames based on source
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            ext = '.md' if output_format == 'markdown' else ('.txt' if output_format == 'text' else '.json')
+
+            for i, result in enumerate(results):
+                source_path = Path(result.source)
+                
+                # Handle URLs or unknown sources
+                if not source_path.exists() and "://" in result.source:
+                     # For URLs, save to current directory with sanitized name
+                     stem = source_path.name.split('?')[0] # Remove query params
+                     if not stem:
+                         stem = "url_result"
+                     output_dir = Path.cwd()
+                else:
+                    # For local files, save to same directory
+                    stem = source_path.stem
+                    output_dir = source_path.parent
+
+                file_name = f"{stem}_macocr_{timestamp}{ext}"
+                file_path = output_dir / file_name
+
+                # If processing multiple files (batch), we need specific content for each
+                # Re-format just for this result to ensure correct content separation
+                formatted_single = format_result(
+                    result,
+                    format_type=output_format,
+                    include_metadata=not no_metadata,
+                    include_details=details,
+                )
+                
+                file_path.write_text(formatted_single, encoding='utf-8')
+                click.echo(f"Saved: {file_path}", err=True)
+
+        elif output_path:
             output_path = Path(output_path)
 
             # If output is a directory, create files for each result
