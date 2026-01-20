@@ -38,8 +38,8 @@ class ParagraphDetector:
             return []
 
         # 按 y 坐标排序（从上到下）
-        # 注意：Apple Vision 使用 y=0 在图片底部的坐标系，所以需要降序排序
-        sorted_lines = sorted(ocr_results, key=lambda r: r[2][1], reverse=True)
+        # 坐标已在 adaptive.py 中转换为 y=0 在顶部的系统，所以升序排序
+        sorted_lines = sorted(ocr_results, key=lambda r: r[2][1])
 
         # 计算平均行高
         avg_height = self._calculate_avg_height(sorted_lines)
