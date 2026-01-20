@@ -22,12 +22,13 @@ class TextCleaner:
     6. 清理多余空行
     """
 
-    def __init__(self, duplicate_threshold: float = 0.8):
+    def __init__(self, duplicate_threshold: float = 0.95):
         """
         初始化文本清理器
 
         Args:
             duplicate_threshold: 文本相似度阈值，超过此值认为是重复行
+                                 使用较高值 (0.95) 以避免误删相似但不同的行
         """
         self.duplicate_threshold = duplicate_threshold
 
@@ -190,7 +191,12 @@ class TextCleaner:
         return ""
 
     def _calculate_similarity(self, text1: str, text2: str) -> float:
-        """计算两个文本的相似度（Jaccard）"""
+        """
+        计算两个文本的相似度（序列比较）
+
+        使用 difflib 的 SequenceMatcher，它基于最长公共子序列，
+        更适合检测真正的重复内容，而不是只看字符集重叠。
+        """
         if not text1 or not text2:
             return 0.0
         if text1 == text2:
@@ -198,11 +204,10 @@ class TextCleaner:
         if text1 in text2 or text2 in text1:
             return 0.9
 
-        set1 = set(text1)
-        set2 = set(text2)
-        intersection = len(set1 & set2)
-        union = len(set1 | set2)
-        return intersection / union if union > 0 else 0.0
+        # 使用序列相似度而非集合相似度
+        # 这样 "第一段的第一行内容" 和 "第一段的第二行内容" 不会被认为是重复的
+        from difflib import SequenceMatcher
+        return SequenceMatcher(None, text1, text2).ratio()
 
     # ==================== 断句合并 ====================
 

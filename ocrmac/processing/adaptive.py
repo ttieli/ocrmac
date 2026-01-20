@@ -364,16 +364,25 @@ class AdaptiveOCR:
         )
         raw_results = ocr.recognize()
 
-        return [
-            MergedResult(
+        results = []
+        for text, conf, bbox in raw_results:
+            bbox_list = bbox if isinstance(bbox, list) else list(bbox)
+
+            # 转换 Vision 坐标系 (y=0 在底部) 到像素坐标系 (y=0 在顶部)
+            # Vision: y 是文本框底部距离图片底部的比例
+            # 转换: y_from_top = 1 - y - h
+            x, y, w, h = bbox_list
+            converted_bbox = [x, 1 - y - h, w, h]
+
+            results.append(MergedResult(
                 text=text,
                 confidence=conf,
-                bbox=bbox if isinstance(bbox, list) else list(bbox),
+                bbox=converted_bbox,
                 slice_index=0,
-                original_bbox=bbox if isinstance(bbox, list) else list(bbox),
-            )
-            for text, conf, bbox in raw_results
-        ]
+                original_bbox=bbox_list,
+            ))
+
+        return results
 
     def _process_with_slicing(
         self, image: Image.Image, profile: ImageProfile

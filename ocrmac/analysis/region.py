@@ -326,7 +326,7 @@ class RegionDetector:
         return filtered
 
     def _merge_overlapping(self, regions: List) -> List:
-        """合并重叠的区域"""
+        """合并重叠的区域，同时处理包含关系"""
         if len(regions) <= 1:
             return regions
 
@@ -342,14 +342,20 @@ class RegionDetector:
 
             bbox_i = region_i[0]
 
-            # 检查是否与其他区域重叠
+            # 检查是否与其他区域重叠或被包含
             for j, region_j in enumerate(regions):
                 if i == j or j in used:
                     continue
 
                 bbox_j = region_j[0]
-                iou = self._calculate_iou(bbox_i, bbox_j)
 
+                # 检查是否有包含关系（小区域被大区域包含）
+                if self._is_contained(bbox_j, bbox_i):
+                    used.add(j)
+                    continue
+
+                # 检查 IoU 重叠
+                iou = self._calculate_iou(bbox_i, bbox_j)
                 if iou > self.MERGE_OVERLAP_THRESHOLD:
                     used.add(j)
 
@@ -357,6 +363,36 @@ class RegionDetector:
             used.add(i)
 
         return merged
+
+    def _is_contained(self, inner_bbox: tuple, outer_bbox: tuple, threshold: float = 0.8) -> bool:
+        """
+        检查 inner_bbox 是否大部分被 outer_bbox 包含
+
+        Args:
+            inner_bbox: 内部边界框 (x, y, w, h)
+            outer_bbox: 外部边界框 (x, y, w, h)
+            threshold: 包含阈值，inner 被 outer 覆盖的比例
+
+        Returns:
+            是否被包含
+        """
+        x1, y1, w1, h1 = inner_bbox
+        x2, y2, w2, h2 = outer_bbox
+
+        # 计算交集
+        xi1 = max(x1, x2)
+        yi1 = max(y1, y2)
+        xi2 = min(x1 + w1, x2 + w2)
+        yi2 = min(y1 + h1, y2 + h2)
+
+        if xi2 <= xi1 or yi2 <= yi1:
+            return False
+
+        inter_area = (xi2 - xi1) * (yi2 - yi1)
+        inner_area = w1 * h1
+
+        # 如果 inner 的大部分被 outer 覆盖，则认为被包含
+        return inner_area > 0 and (inter_area / inner_area) >= threshold
 
     def _calculate_iou(self, bbox1: tuple, bbox2: tuple) -> float:
         """计算两个边界框的 IoU"""
