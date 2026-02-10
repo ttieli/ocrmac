@@ -1,5 +1,14 @@
 # History
 
+## 1.4.0 (2026-02-10)
+* Added **Batch Parallel Processing**: Support multiple INPUT_PATHs in a single CLI invocation.
+* Multiple files/URLs are processed in parallel via `ThreadPoolExecutor`, eliminating repeated Python startup overhead.
+* New `--batch` / `-b` option: Read input paths from stdin (pipe mode).
+* New `--workers` / `-w` option: Control parallel worker count (default: min(inputs, 8)).
+* Multi-input stdout output uses `--- [N/M] filename ---` separators; single-input behavior is fully backward compatible.
+* Error tolerance: One failed input does not block others.
+* Added 14 new CLI tests (`tests/test_cli_batch.py`).
+
 ## 1.3.0 (2026-01-19)
 * Added **Smart OCR** feature: Automatic strategy selection for optimal OCR results.
 * Added **Adaptive Slicing**: Intelligent image slicing at safe boundaries for long screenshots.

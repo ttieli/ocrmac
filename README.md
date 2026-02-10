@@ -34,14 +34,65 @@ print(result['text'])      # Clean, deduplicated text
 print(result['strategy'])  # 'article', 'multi_doc', or 'simple'
 ```
 
-### New Modules
+### Architecture | 架构
+
+```mermaid
+graph TB
+    subgraph Input
+        A[Image/PDF/URL]
+    end
+
+    subgraph Processing
+        B[SmartOCR] --> C{Strategy}
+        C -->|simple| D[Direct OCR]
+        C -->|article| E[SmartSlicer]
+        C -->|multi_doc| F[RegionDetector]
+        E --> G[AdaptiveOCR]
+        F --> G
+        D --> H[OCR Core]
+        G --> H
+    end
+
+    subgraph OCR Core
+        H --> I{Framework}
+        I -->|vision| J[VNRecognizeTextRequest]
+        I -->|livetext| K[VKCImageAnalyzer]
+    end
+
+    subgraph PostProcessing
+        J --> L[CoordinateMerger]
+        K --> L
+        L --> M[LayoutAnalyzer]
+        M --> N[TextCleaner]
+    end
+
+    subgraph Output
+        N --> O[Text/Markdown]
+        L --> P[Annotated Image]
+        L --> Q[JSON with BBox]
+    end
+```
+
+### Module Structure | 模块结构
 
 ```
 ocrmac/
-├── processing/      # SmartOCR, AdaptiveOCR, SmartSlicer
-├── analysis/        # ImageAnalyzer, LayoutAnalyzer, RegionDetector
-├── preprocessing/   # ImagePreprocessor
-└── postprocessing/  # TextCleaner (dedup, merge, format)
+├── ocrmac.py           # Core OCR (Vision/LiveText API)
+├── cli.py              # Command-line interface
+├── processing/         # Processing pipeline
+│   ├── smart.py        #   SmartOCR - strategy selection
+│   ├── adaptive.py     #   AdaptiveOCR - slice & merge
+│   └── slicer.py       #   SmartSlicer - safe boundary slicing
+├── analysis/           # Analysis modules
+│   ├── image.py        #   ImageAnalyzer - image profiling
+│   ├── layout.py       #   LayoutAnalyzer - paragraph/heading detection
+│   ├── region.py       #   RegionDetector - multi-region detection
+│   ├── coordinates.py  #   CoordinateMerger - bbox merging
+│   └── table.py        #   TableDetector - table structure
+├── preprocessing/      # Image preprocessing
+│   └── image.py        #   ImagePreprocessor - enhancement
+└── postprocessing/     # Text postprocessing
+    └── text.py         #   TextCleaner - dedup/merge/format
 ```
 
 This only works on macOS systems with newer macOS versions (10.15+).
@@ -80,6 +131,12 @@ ocrmac https://example.com/image.png
 # Batch process a directory
 ocrmac ./images/ -o ./results/
 
+# Parallel processing - multiple files/URLs at once (New in 1.4.0)
+ocrmac a.png b.png c.png --stdout       # Parallel OCR, results separated
+ocrmac "url1" "url2" "url3" --stdout    # Parallel download + OCR
+cat urls.txt | ocrmac --batch --stdout  # Read inputs from stdin
+ocrmac a.png b.png -w 4                 # Limit to 4 workers
+
 # Use different output formats
 ocrmac image.png -f text          # Plain text
 ocrmac image.png -f json          # JSON with coordinates
@@ -107,6 +164,8 @@ ocrmac image.png --framework livetext  # Apple LiveText (default, macOS Sonoma+)
 | `-r, --recursive` | Process directories recursively |
 | `--no-metadata` | Exclude metadata from markdown output |
 | `--details` | Include bounding box details in JSON output |
+| `-b, --batch` | Read input paths from stdin (one per line) |
+| `-w, --workers N` | Number of parallel workers (default: min(inputs, 8)) |
 
 ### Supported Input Types
 
@@ -138,12 +197,93 @@ Output (Text, Confidence, BoundingBox):
 
 ### Create Annotated Images
 
+Visualize OCR results by drawing bounding boxes and text labels on the original image.
+
+#### Method 1: PIL (Recommended for saving files)
+
 ```python
 from ocrmac import ocrmac
-ocrmac.OCR('test.png').annotate_PIL()
+
+ocr = ocrmac.OCR('test.png')
+ocr.recognize()
+
+# Generate annotated image
+annotated = ocr.annotate_PIL(color="red", fontsize=12)
+annotated.save('output.png')
 ```
 
+**Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `color` | str | `"red"` | Box and text color |
+| `fontsize` | int | `12` | Font size for labels |
+
+**Returns:** `PIL.Image.Image` - Can be saved with `.save()` method
+
+#### Method 2: Matplotlib (For Jupyter/interactive display)
+
+```python
+from ocrmac import ocrmac
+
+ocr = ocrmac.OCR('test.png')
+ocr.recognize()
+
+# Display with matplotlib
+fig = ocr.annotate_matplotlib(figsize=(20, 20), color="red", alpha=0.5, fontsize=12)
+fig.savefig('output.png')  # Or use plt.show() in Jupyter
+```
+
+**Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `figsize` | tuple | `(20, 20)` | Figure size in inches |
+| `color` | str | `"red"` | Box and text color |
+| `alpha` | float | `0.5` | Image transparency (0-1) |
+| `fontsize` | int | `12` | Font size for labels |
+
+**Returns:** `matplotlib.figure.Figure`
+
+#### Comparison
+
+| Feature | `annotate_PIL()` | `annotate_matplotlib()` |
+|---------|------------------|-------------------------|
+| Dependency | PIL (required) | matplotlib (optional) |
+| Output | `Image.Image` | `Figure` |
+| Transparency | ✗ | ✓ `alpha` param |
+| Best for | File saving, batch | Jupyter, interactive |
+
 ![Plot](https://github.com/ttieli/ocrmac/blob/main/output.png?raw=true)
+
+### Coordinate Conversion Utilities
+
+Convert Apple Vision normalized coordinates (0-1) to pixel coordinates:
+
+```python
+from ocrmac.ocrmac import convert_coordinates_pil, convert_coordinates_pyplot
+
+# Vision returns: (x, y, w, h) where y=0 is at BOTTOM
+bbox = [0.1, 0.8, 0.3, 0.05]  # normalized coordinates
+image_width, image_height = 1000, 800
+
+# For PIL/Pillow (returns x1, y1, x2, y2)
+x1, y1, x2, y2 = convert_coordinates_pil(bbox, image_width, image_height)
+
+# For Matplotlib (returns x1, y1, width, height in plot coords)
+x1, y1, w, h = convert_coordinates_pyplot(bbox, image_width, image_height)
+```
+
+### Get Results with Pixel Coordinates
+
+```python
+from ocrmac import ocrmac
+
+ocr = ocrmac.OCR('test.png')
+
+# Get results with pixel coordinates directly
+results = ocr.recognize(px=True)
+# Returns: [(text, confidence, (x1, y1, x2, y2)), ...]
+# Coordinates are in pixels, ready for drawing
+```
 
 ## Advanced Features
 
@@ -229,10 +369,63 @@ layout = analyzer.analyze(results)
 print(analyzer.to_markdown(layout))
 ```
 
-## Functionality
+## API Reference
+
+### Classes
+
+#### `OCR` Class
+
+Main class for OCR operations.
+
+```python
+from ocrmac import ocrmac
+
+ocr = ocrmac.OCR(
+    image,                      # str path or PIL.Image
+    framework='vision',         # 'vision' or 'livetext'
+    recognition_level='accurate',  # 'accurate' or 'fast' (vision only)
+    language_preference=None,   # e.g. ['zh-Hans', 'en-US']
+    confidence_threshold=0.0,   # 0.0-1.0 (vision only)
+    detail=True,                # include bounding boxes
+    unit='token'                # 'token' or 'line' (livetext only)
+)
+
+# Methods
+results = ocr.recognize(px=False)  # px=True for pixel coordinates
+annotated = ocr.annotate_PIL(color="red", fontsize=12)
+fig = ocr.annotate_matplotlib(figsize=(20,20), color="red", alpha=0.5, fontsize=12)
+```
+
+### Helper Functions
+
+```python
+from ocrmac import ocrmac
+
+# Direct function calls (without class)
+results = ocrmac.text_from_image(
+    image,                      # str path or PIL.Image
+    recognition_level='accurate',
+    language_preference=None,
+    confidence_threshold=0.0,
+    detail=True
+)
+
+results = ocrmac.livetext_from_image(
+    image,                      # str path or PIL.Image
+    language_preference=None,
+    detail=True,
+    unit='token'                # 'token' or 'line'
+)
+
+# Coordinate conversion
+x1, y1, x2, y2 = ocrmac.convert_coordinates_pil(bbox, width, height)
+x1, y1, w, h = ocrmac.convert_coordinates_pyplot(bbox, width, height)
+```
+
+### Functionality Summary
 
 - You can pass the path to an image or a PIL image as an object
-- You can use as a class (`ocrmac.OCR`) or function `ocrmac.text_from_image`)
+- You can use as a class (`ocrmac.OCR`) or function (`ocrmac.text_from_image`)
 - You can pass several arguments:
     - `recognition_level`: `fast` or `accurate`
     - `language_preference`: A list with languages for post-processing, e.g. `['en-US', 'zh-Hans', 'de-DE']`.
@@ -330,6 +523,67 @@ print(result['text'])      # 清理后的文本，已去重
 print(result['strategy'])  # 'article', 'multi_doc', 或 'simple'
 ```
 
+### 架构图
+
+```mermaid
+graph TB
+    subgraph 输入
+        A[图片/PDF/URL]
+    end
+
+    subgraph 处理流程
+        B[SmartOCR] --> C{策略选择}
+        C -->|simple| D[直接识别]
+        C -->|article| E[智能切片]
+        C -->|multi_doc| F[区域检测]
+        E --> G[自适应处理]
+        F --> G
+        D --> H[OCR 核心]
+        G --> H
+    end
+
+    subgraph OCR核心
+        H --> I{框架}
+        I -->|vision| J[Vision API]
+        I -->|livetext| K[LiveText API]
+    end
+
+    subgraph 后处理
+        J --> L[坐标合并]
+        K --> L
+        L --> M[布局分析]
+        M --> N[文本清理]
+    end
+
+    subgraph 输出
+        N --> O[文本/Markdown]
+        L --> P[标注图片]
+        L --> Q[JSON含坐标]
+    end
+```
+
+### 模块结构
+
+```
+ocrmac/
+├── ocrmac.py           # 核心 OCR（Vision/LiveText）
+├── cli.py              # 命令行接口
+├── processing/         # 处理管道
+│   ├── smart.py        #   SmartOCR - 策略选择
+│   ├── adaptive.py     #   AdaptiveOCR - 切片合并
+│   └── slicer.py       #   SmartSlicer - 安全切片
+├── analysis/           # 分析模块
+│   ├── image.py        #   ImageAnalyzer - 图像分析
+│   ├── layout.py       #   LayoutAnalyzer - 布局检测
+│   ├── region.py       #   RegionDetector - 区域检测
+│   ├── coordinates.py  #   CoordinateMerger - 坐标合并
+│   └── table.py        #   TableDetector - 表格检测
+├── preprocessing/      # 预处理
+│   └── image.py        #   ImagePreprocessor - 图像增强
+└── postprocessing/     # 后处理
+    └── text.py         #   TextCleaner - 去重/格式化
+```
+
 仅支持 macOS 10.15+ 系统。
 
 ## 安装
@@ -366,6 +620,12 @@ ocrmac https://example.com/image.png
 # 批量处理目录
 ocrmac ./images/ -o ./results/
 
+# 并行处理 - 多文件/多 URL 同时识别（1.4.0 新增）
+ocrmac a.png b.png c.png --stdout       # 并行 OCR，分隔符输出
+ocrmac "url1" "url2" "url3" --stdout    # 并行下载+OCR
+cat urls.txt | ocrmac --batch --stdout  # 从 stdin 读取输入
+ocrmac a.png b.png -w 4                 # 限制 4 个并行线程
+
 # 不同输出格式
 ocrmac image.png -f text          # 纯文本
 ocrmac image.png -f json          # JSON 格式
@@ -393,6 +653,8 @@ ocrmac image.png --framework livetext  # Apple LiveText（默认，需 macOS Son
 | `-r, --recursive` | 递归处理目录 |
 | `--no-metadata` | 不在 Markdown 中包含元数据 |
 | `--details` | 在 JSON 中包含边界框详情 |
+| `-b, --batch` | 从 stdin 读取输入路径（每行一个） |
+| `-w, --workers N` | 并行线程数（默认：min(输入数, 8)） |
 
 ### 支持的输入类型
 
@@ -421,12 +683,146 @@ print(annotations)
 
 ### 创建标注图片
 
+在原图上绘制识别框和文字标签，可视化 OCR 结果。
+
+#### 方式一：PIL（推荐用于保存文件）
+
 ```python
 from ocrmac import ocrmac
-ocrmac.OCR('test.png').annotate_PIL()
+
+ocr = ocrmac.OCR('test.png')
+ocr.recognize()
+
+# 生成标注图片
+annotated = ocr.annotate_PIL(color="red", fontsize=12)
+annotated.save('output.png')
 ```
 
-## 功能特性
+**参数：**
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `color` | str | `"red"` | 框和文字颜色 |
+| `fontsize` | int | `12` | 字体大小 |
+
+**返回：** `PIL.Image.Image` - 可用 `.save()` 保存
+
+#### 方式二：Matplotlib（用于 Jupyter/交互显示）
+
+```python
+from ocrmac import ocrmac
+
+ocr = ocrmac.OCR('test.png')
+ocr.recognize()
+
+# 使用 matplotlib 显示
+fig = ocr.annotate_matplotlib(figsize=(20, 20), color="red", alpha=0.5, fontsize=12)
+fig.savefig('output.png')  # 或在 Jupyter 中用 plt.show()
+```
+
+**参数：**
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `figsize` | tuple | `(20, 20)` | 图片尺寸（英寸） |
+| `color` | str | `"red"` | 框和文字颜色 |
+| `alpha` | float | `0.5` | 图片透明度 (0-1) |
+| `fontsize` | int | `12` | 字体大小 |
+
+**返回：** `matplotlib.figure.Figure`
+
+#### 对比
+
+| 特性 | `annotate_PIL()` | `annotate_matplotlib()` |
+|------|------------------|-------------------------|
+| 依赖 | PIL（必装） | matplotlib（可选） |
+| 输出 | `Image.Image` | `Figure` |
+| 透明度 | ✗ | ✓ `alpha` 参数 |
+| 适用 | 保存文件、批处理 | Jupyter、交互式 |
+
+### 坐标转换工具
+
+将 Apple Vision 归一化坐标 (0-1) 转为像素坐标：
+
+```python
+from ocrmac.ocrmac import convert_coordinates_pil, convert_coordinates_pyplot
+
+# Vision 返回: (x, y, w, h)，y=0 在图片底部
+bbox = [0.1, 0.8, 0.3, 0.05]  # 归一化坐标
+image_width, image_height = 1000, 800
+
+# PIL/Pillow 格式（返回 x1, y1, x2, y2）
+x1, y1, x2, y2 = convert_coordinates_pil(bbox, image_width, image_height)
+
+# Matplotlib 格式（返回绘图坐标）
+x1, y1, w, h = convert_coordinates_pyplot(bbox, image_width, image_height)
+```
+
+### 获取像素坐标结果
+
+```python
+from ocrmac import ocrmac
+
+ocr = ocrmac.OCR('test.png')
+
+# 直接获取像素坐标
+results = ocr.recognize(px=True)
+# 返回: [(text, confidence, (x1, y1, x2, y2)), ...]
+# 坐标已转为像素值，可直接用于绘图
+```
+
+## API 参考
+
+### 类
+
+#### `OCR` 类
+
+OCR 操作的主类。
+
+```python
+from ocrmac import ocrmac
+
+ocr = ocrmac.OCR(
+    image,                      # 路径字符串或 PIL.Image
+    framework='vision',         # 'vision' 或 'livetext'
+    recognition_level='accurate',  # 'accurate' 或 'fast'（仅 vision）
+    language_preference=None,   # 如 ['zh-Hans', 'en-US']
+    confidence_threshold=0.0,   # 0.0-1.0（仅 vision）
+    detail=True,                # 是否包含边界框
+    unit='token'                # 'token' 或 'line'（仅 livetext）
+)
+
+# 方法
+results = ocr.recognize(px=False)  # px=True 返回像素坐标
+annotated = ocr.annotate_PIL(color="red", fontsize=12)
+fig = ocr.annotate_matplotlib(figsize=(20,20), color="red", alpha=0.5, fontsize=12)
+```
+
+### 辅助函数
+
+```python
+from ocrmac import ocrmac
+
+# 直接函数调用（无需实例化类）
+results = ocrmac.text_from_image(
+    image,                      # 路径字符串或 PIL.Image
+    recognition_level='accurate',
+    language_preference=None,
+    confidence_threshold=0.0,
+    detail=True
+)
+
+results = ocrmac.livetext_from_image(
+    image,                      # 路径字符串或 PIL.Image
+    language_preference=None,
+    detail=True,
+    unit='token'                # 'token' 或 'line'
+)
+
+# 坐标转换
+x1, y1, x2, y2 = ocrmac.convert_coordinates_pil(bbox, width, height)
+x1, y1, w, h = ocrmac.convert_coordinates_pyplot(bbox, width, height)
+```
+
+### 功能特性
 
 - 支持传入图片路径或 PIL 图像对象
 - 可使用类 (`ocrmac.OCR`) 或函数 (`ocrmac.text_from_image`)
