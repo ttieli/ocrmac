@@ -2,6 +2,7 @@
 
 import os
 import sys
+import concurrent.futures
 from pathlib import Path
 
 import click
@@ -347,6 +348,44 @@ def process_input(input_path, framework, level, language, recursive=False, adapt
     return results
 
 
+def process_batch(inputs, framework, level, language, recursive, stdout_mode,
+                   output_path, output_format, no_metadata, details, layout,
+                   adaptive, binarize, aggressive, split_regions, smart, verbose,
+                   workers):
+    """并行处理多个输入，返回按输入顺序排列的 (path, results, error) 列表"""
+    import objc
+
+    max_workers = workers or min(len(inputs), 8)
+
+    def process_one(index, path):
+        """Worker: 处理单个输入"""
+        try:
+            with objc.autorelease_pool():
+                results = process_input(
+                    path, framework, level, language, recursive,
+                    adaptive=adaptive, binarize=binarize, aggressive=aggressive,
+                    split_regions=split_regions, smart=smart, verbose=verbose
+                )
+                return (index, path, results, None)
+        except Exception as e:
+            return (index, path, None, str(e))
+
+    click.echo(f"Processing {len(inputs)} inputs with {max_workers} workers...", err=True)
+
+    results_map = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(process_one, i, p): i
+            for i, p in enumerate(inputs)
+        }
+        for future in concurrent.futures.as_completed(futures):
+            idx, path, results, error = future.result()
+            results_map[idx] = (path, results, error)
+
+    # 按输入顺序返回
+    return [results_map[i] for i in range(len(inputs))]
+
+
 def show_usage_guide():
     """显示友好的使用指南"""
     guide = """
@@ -373,6 +412,12 @@ ocrmac - macOS 原生 OCR 工具 (v1.3.0)
   ocrmac ./images/                   # 处理目录中所有文件
   ocrmac ./images/ -o ./results/     # 输出到指定目录
   ocrmac ./images/ -r                # 递归处理子目录
+
+并行处理（多输入）:
+  ocrmac a.png b.png c.png --stdout  # 多文件并行 OCR
+  ocrmac "url1" "url2" --stdout      # 多 URL 并行下载+OCR
+  cat urls.txt | ocrmac --batch -p   # 从 stdin 读取输入
+  ocrmac a.png b.png -w 4            # 指定 4 个并行线程
 
 输出格式:
   ocrmac image.png -f markdown       # Markdown 格式（默认）
@@ -412,7 +457,7 @@ OCR 框架:
 
 
 @click.command()
-@click.argument('input_path', type=str, required=False, default=None)
+@click.argument('input_path', nargs=-1)
 @click.option('-o', '--output', 'output_path', type=str, default=None,
               help='Output file path. If not specified, prints to stdout.')
 @click.option('-f', '--format', 'output_format', type=click.Choice(['markdown', 'text', 'json']),
@@ -445,11 +490,15 @@ OCR 框架:
               help='Disable smart auto-detection mode (use legacy adaptive mode)')
 @click.option('--verbose', '-v', is_flag=True, default=False,
               help='Show detailed processing information')
-def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details, no_adaptive, binarize, aggressive, split_regions, layout, no_smart, verbose):
+@click.option('--batch', '-b', is_flag=True, default=False,
+              help='Read input paths from stdin (one per line)')
+@click.option('--workers', '-w', type=int, default=None,
+              help='Number of parallel workers (default: min(inputs, 8))')
+def main(input_path, output_path, output_format, language, framework, level, recursive, stdout, no_metadata, details, no_adaptive, binarize, aggressive, split_regions, layout, no_smart, verbose, batch, workers):
     """
     OCR tool for macOS - Extract text from images, PDFs, and DOCX files.
 
-    INPUT_PATH can be:
+    INPUT_PATH can be one or more of:
 
     \b
       - Local image file (png, jpg, etc.)
@@ -466,56 +515,163 @@ def main(input_path, output_path, output_format, language, framework, level, rec
       ocrmac image.png -o result.md           # Save as specific file
       ocrmac document.pdf -o result.md        # OCR all PDF pages
       ocrmac ./images/ -o ./results/          # Batch process directory
+      ocrmac a.png b.png c.png --stdout       # Parallel OCR multiple files
+      cat urls.txt | ocrmac --batch --stdout  # Read inputs from stdin
     """
-    # 如果没有提供输入路径，显示使用指南
-    if input_path is None:
+    # 收集所有输入
+    inputs = list(input_path)  # nargs=-1 返回 tuple
+
+    if batch:
+        if inputs:
+            raise click.UsageError("--batch cannot be used with positional arguments")
+        inputs = [line.strip() for line in sys.stdin if line.strip()]
+
+    # 无输入时显示使用指南
+    if not inputs:
         show_usage_guide()
         return 0
 
     from datetime import datetime
     adaptive = not no_adaptive  # 默认启用自适应处理
     smart = not no_smart  # 默认启用智能模式
+
+    # === 单输入：走原有逻辑，完全向后兼容 ===
+    if len(inputs) == 1:
+        try:
+            results = process_input(
+                inputs[0], framework, level, language, recursive,
+                adaptive=adaptive, binarize=binarize, aggressive=aggressive,
+                split_regions=split_regions, smart=smart, verbose=verbose
+            )
+
+            if not results:
+                click.echo("No results.", err=True)
+                return 1
+
+            # Format output
+            output_parts = []
+            for result in results:
+                formatted = format_result(
+                    result,
+                    format_type=output_format,
+                    include_metadata=not no_metadata,
+                    include_details=details,
+                    use_layout=layout,
+                )
+                output_parts.append(formatted)
+
+            output_text = "\n\n---\n\n".join(output_parts)
+
+            if output_path:
+                output_path = Path(output_path)
+
+                if output_path.is_dir() or (len(results) > 1 and not output_path.suffix):
+                    output_path.mkdir(parents=True, exist_ok=True)
+                    for result in results:
+                        source_name = Path(result.source).stem
+                        ext = '.md' if output_format == 'markdown' else ('.txt' if output_format == 'text' else '.json')
+                        file_path = output_path / f"{source_name}{ext}"
+
+                        formatted = format_result(
+                            result,
+                            format_type=output_format,
+                            include_metadata=not no_metadata,
+                            include_details=details,
+                            use_layout=layout,
+                        )
+                        file_path.write_text(formatted, encoding='utf-8')
+                        click.echo(f"Saved: {file_path}", err=True)
+                else:
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_text(output_text, encoding='utf-8')
+                    click.echo(f"Saved: {output_path}", err=True)
+
+            elif stdout:
+                click.echo(output_text)
+
+            else:
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                ext = '.md' if output_format == 'markdown' else ('.txt' if output_format == 'text' else '.json')
+
+                for i, result in enumerate(results):
+                    source_path = Path(result.source)
+
+                    if not source_path.exists() and "://" in result.source:
+                         stem = source_path.name.split('?')[0]
+                         if not stem:
+                             stem = "url_result"
+                         output_dir = Path.cwd()
+                    else:
+                        stem = source_path.stem
+                        output_dir = source_path.parent
+
+                    file_name = f"{stem}_macocr_{timestamp}{ext}"
+                    file_path = output_dir / file_name
+
+                    formatted_single = format_result(
+                        result,
+                        format_type=output_format,
+                        include_metadata=not no_metadata,
+                        include_details=details,
+                        use_layout=layout,
+                    )
+
+                    file_path.write_text(formatted_single, encoding='utf-8')
+                    click.echo(f"Saved: {file_path}", err=True)
+
+            return 0
+
+        except Exception as e:
+            raise click.ClickException(str(e))
+
+    # === 多输入：并行处理 ===
     try:
-        results = process_input(
-            input_path, framework, level, language, recursive,
-            adaptive=adaptive, binarize=binarize, aggressive=aggressive,
-            split_regions=split_regions, smart=smart, verbose=verbose
+        batch_results = process_batch(
+            inputs, framework, level, language, recursive, stdout,
+            output_path, output_format, no_metadata, details, layout,
+            adaptive, binarize, aggressive, split_regions, smart, verbose,
+            workers
         )
 
-        if not results:
-            click.echo("No results.", err=True)
-            return 1
+        total = len(batch_results)
+        has_error = False
 
-        # Format output
-        output_parts = []
-        for result in results:
-            formatted = format_result(
-                result,
-                format_type=output_format,
-                include_metadata=not no_metadata,
-                include_details=details,
-                use_layout=layout,
-            )
-            output_parts.append(formatted)
+        if stdout:
+            # --stdout: 分隔符格式输出
+            for i, (path, results, error) in enumerate(batch_results):
+                label = Path(path).name if not is_url(path) else path
+                if error:
+                    click.echo(f"--- [{i+1}/{total}] {label} [ERROR] ---")
+                    click.echo(error)
+                    has_error = True
+                else:
+                    click.echo(f"--- [{i+1}/{total}] {label} ---")
+                    for result in results:
+                        formatted = format_result(
+                            result,
+                            format_type=output_format,
+                            include_metadata=not no_metadata,
+                            include_details=details,
+                            use_layout=layout,
+                        )
+                        click.echo(formatted)
+                if i < total - 1:
+                    click.echo("")  # blank line between entries
 
-        output_text = "\n\n---\n\n".join(output_parts)
+        elif output_path:
+            # -o: 输出到目录，每个独立文件
+            out_dir = Path(output_path)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ext = '.md' if output_format == 'markdown' else ('.txt' if output_format == 'text' else '.json')
 
-        # Logic:
-        # 1. If -o/--output is provided -> Save to that specific path/dir
-        # 2. If --stdout is provided -> Print to terminal
-        # 3. Default -> Auto-save to {stem}_macocr_{timestamp}.{ext}
-
-        if output_path:
-            output_path = Path(output_path)
-
-            # If output is a directory, create files for each result
-            if output_path.is_dir() or (len(results) > 1 and not output_path.suffix):
-                output_path.mkdir(parents=True, exist_ok=True)
+            for i, (path, results, error) in enumerate(batch_results):
+                if error:
+                    click.echo(f"[ERROR] {path}: {error}", err=True)
+                    has_error = True
+                    continue
                 for result in results:
                     source_name = Path(result.source).stem
-                    ext = '.md' if output_format == 'markdown' else ('.txt' if output_format == 'text' else '.json')
-                    file_path = output_path / f"{source_name}{ext}"
-
+                    file_path = out_dir / f"{source_name}{ext}"
                     formatted = format_result(
                         result,
                         format_type=output_format,
@@ -525,53 +681,43 @@ def main(input_path, output_path, output_format, language, framework, level, rec
                     )
                     file_path.write_text(formatted, encoding='utf-8')
                     click.echo(f"Saved: {file_path}", err=True)
-            else:
-                # Single output file
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_text(output_text, encoding='utf-8')
-                click.echo(f"Saved: {output_path}", err=True)
-
-        elif stdout:
-            # Print to stdout
-            click.echo(output_text)
 
         else:
-            # Default: Auto-save mode
+            # 默认: auto-save 每个独立文件
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             ext = '.md' if output_format == 'markdown' else ('.txt' if output_format == 'text' else '.json')
 
-            for i, result in enumerate(results):
-                source_path = Path(result.source)
-                
-                # Handle URLs or unknown sources
-                if not source_path.exists() and "://" in result.source:
-                     # For URLs, save to current directory with sanitized name
-                     stem = source_path.name.split('?')[0] # Remove query params
-                     if not stem:
-                         stem = "url_result"
-                     output_dir = Path.cwd()
-                else:
-                    # For local files, save to same directory
-                    stem = source_path.stem
-                    output_dir = source_path.parent
+            for i, (path, results, error) in enumerate(batch_results):
+                if error:
+                    click.echo(f"[ERROR] {path}: {error}", err=True)
+                    has_error = True
+                    continue
+                for result in results:
+                    source_path = Path(result.source)
 
-                file_name = f"{stem}_macocr_{timestamp}{ext}"
-                file_path = output_dir / file_name
+                    if not source_path.exists() and "://" in result.source:
+                        stem = source_path.name.split('?')[0]
+                        if not stem:
+                            stem = "url_result"
+                        output_dir = Path.cwd()
+                    else:
+                        stem = source_path.stem
+                        output_dir = source_path.parent
 
-                # If processing multiple files (batch), we need specific content for each
-                # Re-format just for this result to ensure correct content separation
-                formatted_single = format_result(
-                    result,
-                    format_type=output_format,
-                    include_metadata=not no_metadata,
-                    include_details=details,
-                    use_layout=layout,
-                )
-                
-                file_path.write_text(formatted_single, encoding='utf-8')
-                click.echo(f"Saved: {file_path}", err=True)
+                    file_name = f"{stem}_macocr_{timestamp}{ext}"
+                    file_path = output_dir / file_name
 
-        return 0
+                    formatted_single = format_result(
+                        result,
+                        format_type=output_format,
+                        include_metadata=not no_metadata,
+                        include_details=details,
+                        use_layout=layout,
+                    )
+                    file_path.write_text(formatted_single, encoding='utf-8')
+                    click.echo(f"Saved: {file_path}", err=True)
+
+        return 1 if has_error else 0
 
     except Exception as e:
         raise click.ClickException(str(e))
